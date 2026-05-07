@@ -127,5 +127,8 @@ release-notes.md
 *.mo
 *.pot
 
+# ---- Local scratch / debugging utilities (not part of the project) ----
+scratch/
+
 # ---- Sphinx documentation ----
 docs/_build/

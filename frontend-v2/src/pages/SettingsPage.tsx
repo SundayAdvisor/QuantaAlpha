@@ -127,7 +127,7 @@ export const SettingsPage: React.FC = () => {
           // use defaults
         }
       }
-      setError('无法从后端加载配置，显示的是本地缓存配置');
+      setError('Could not load configuration from the backend — showing locally cached values.');
     } finally {
       setIsLoading(false);
     }
@@ -168,7 +168,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (confirm('确定要重置为默认配置吗？')) {
+    if (confirm('Reset to default configuration?')) {
       setConfig(DEFAULT_CONFIG);
       setIsDirty(true);
     }
@@ -183,7 +183,7 @@ export const SettingsPage: React.FC = () => {
     return (
       <div className="flex items-center justify-center min-h-[40vh]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">加载配置中...</span>
+        <span className="ml-3 text-muted-foreground">Loading configuration…</span>
       </div>
     );
   }
@@ -209,16 +209,16 @@ export const SettingsPage: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
             <Settings className="h-8 w-8 text-primary" />
-            系统配置
+            System settings
           </h1>
           <p className="text-muted-foreground mt-1">
-            管理 API 连接、数据源及实验参数
+            Manage API connection, data sources, and experiment parameters
           </p>
         </div>
         <div className="flex gap-3">
           <Button variant="outline" onClick={handleReset}>
             <RotateCcw className="h-4 w-4 mr-2" />
-            重置
+            Reset
           </Button>
           <Button variant="primary" onClick={handleSave} disabled={!isDirty || isSaving}>
             {isSaving ? (
@@ -226,7 +226,7 @@ export const SettingsPage: React.FC = () => {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            保存配置
+            Save
           </Button>
         </div>
       </div>
@@ -235,13 +235,13 @@ export const SettingsPage: React.FC = () => {
       {isSaved && (
         <div className="glass rounded-lg p-4 flex items-center gap-3 bg-success/10 border-success/50 animate-fade-in-down">
           <Check className="h-5 w-5 text-success" />
-          <span className="text-success">配置已保存</span>
+          <span className="text-success">Settings saved</span>
         </div>
       )}
       {isDirty && !isSaved && (
         <div className="glass rounded-lg p-4 flex items-center gap-3 bg-warning/10 border-warning/50 animate-fade-in-down">
           <X className="h-5 w-5 text-warning" />
-          <span className="text-warning">有未保存的更改</span>
+          <span className="text-warning">Unsaved changes</span>
         </div>
       )}
       {error && (
@@ -253,10 +253,10 @@ export const SettingsPage: React.FC = () => {
 
       {/* Tabs Navigation */}
       <div className="flex gap-2 p-1 bg-secondary/20 rounded-xl w-fit flex-wrap">
-        <TabButton id="api" label="配置 API" icon={Cpu} />
-        <TabButton id="data" label="数据路径" icon={Database} />
-        <TabButton id="params" label="默认参数" icon={Sliders} />
-        <TabButton id="directions" label="挖掘方向" icon={Compass} />
+        <TabButton id="api" label="API" icon={Cpu} />
+        <TabButton id="data" label="Data Paths" icon={Database} />
+        <TabButton id="params" label="Default Parameters" icon={Sliders} />
+        <TabButton id="directions" label="Research Directions" icon={Compass} />
       </div>
 
       {/* Tab Content */}
@@ -267,8 +267,8 @@ export const SettingsPage: React.FC = () => {
           <Card className="glass card-hover animate-fade-in-up">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                🤖 LLM 模型配置
-                <Badge variant="default">核心</Badge>
+                🤖 LLM model configuration
+                <Badge variant="default">Core</Badge>
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -293,7 +293,7 @@ export const SettingsPage: React.FC = () => {
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  支持 OpenAI 兼容格式的 API Key（如 DashScope, DeepSeek 等）
+                  Any OpenAI-compatible API key works (DashScope, DeepSeek, OpenAI, etc.)
                 </p>
               </div>
 
@@ -307,12 +307,12 @@ export const SettingsPage: React.FC = () => {
                   className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                 />
                 <p className="text-xs text-muted-foreground mt-1">
-                  LLM 服务端点地址
+                  LLM service endpoint
                 </p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium mb-2">模型名称</label>
+                <label className="block text-sm font-medium mb-2">Model name</label>
                 <select
                   value={config.modelName}
                   onChange={(e) => updateConfigField('modelName', e.target.value)}
@@ -341,10 +341,10 @@ export const SettingsPage: React.FC = () => {
                     }`}
                   />
                   <span className="text-sm">
-                    后端连接状态：
-                    {backendStatus === 'online' ? <span className="text-success font-medium">已连接</span> : 
-                     backendStatus === 'offline' ? <span className="text-destructive font-medium">未连接</span> : 
-                     '检测中...'}
+                    Backend status:{' '}
+                    {backendStatus === 'online' ? <span className="text-success font-medium">Connected</span> :
+                     backendStatus === 'offline' ? <span className="text-destructive font-medium">Not connected</span> :
+                     'Checking…'}
                   </span>
                 </div>
               </div>
@@ -357,13 +357,13 @@ export const SettingsPage: React.FC = () => {
           <Card className="glass card-hover animate-fade-in-up">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                📊 数据存储路径
+                📊 Data paths
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Qlib 数据目录 <span className="text-destructive">*</span>
+                  Qlib data directory <span className="text-destructive">*</span>
                 </label>
                 <div className="flex items-center gap-2">
                   <Database className="h-4 w-4 text-muted-foreground" />
@@ -376,13 +376,13 @@ export const SettingsPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  需包含 calendars/, features/, instruments/ 等 Qlib 标准数据子目录
+                  Must contain Qlib's standard subdirectories: calendars/, features/, instruments/
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  实验结果输出目录
+                  Experiment results output directory
                 </label>
                 <div className="flex items-center gap-2">
                   <Box className="h-4 w-4 text-muted-foreground" />
@@ -395,7 +395,7 @@ export const SettingsPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  用于存放挖掘出的因子、回测报告及日志文件
+                  Where mined factors, backtest reports, and log files are stored
                 </p>
               </div>
 
@@ -403,7 +403,7 @@ export const SettingsPage: React.FC = () => {
                 <div className="bg-secondary/20 rounded-lg p-4 mt-4">
                   <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                     <Check className="h-4 w-4 text-success" />
-                    已识别的因子库
+                    Detected factor libraries
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {factorLibraries.map((lib, idx) => (
@@ -423,13 +423,13 @@ export const SettingsPage: React.FC = () => {
           <Card className="glass card-hover animate-fade-in-up">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                ⚙️ 实验默认参数
+                ⚙️ Default experiment parameters
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium mb-2">并行方向数</label>
+                  <label className="block text-sm font-medium mb-2">Parallel directions</label>
                   <input
                     type="number"
                     value={config.defaultNumDirections}
@@ -439,12 +439,12 @@ export const SettingsPage: React.FC = () => {
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    单次实验同时探索的独立方向数量 (1-10)
+                    Number of independent directions explored in a single experiment (1–10)
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">进化轮次</label>
+                  <label className="block text-sm font-medium mb-2">Evolution rounds</label>
                   <input
                     type="number"
                     value={config.defaultMaxRounds}
@@ -454,25 +454,25 @@ export const SettingsPage: React.FC = () => {
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    因子自我进化和优化的最大迭代次数 (1-20)
+                    Maximum iterations of factor self-evolution and optimization (1–20)
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">默认市场</label>
+                  <label className="block text-sm font-medium mb-2">Default market</label>
                   <select
                     value={config.defaultMarket}
                     onChange={(e) => updateConfigField('defaultMarket', e.target.value)}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   >
-                    <option value="csi300">CSI 300 (沪深300)</option>
-                    <option value="csi500">CSI 500 (中证500)</option>
+                    <option value="csi300">CSI 300 (CSI 300)</option>
+                    <option value="csi500">CSI 500 (CSI 500)</option>
                     <option value="sp500">S&P 500</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">回测超时 (秒)</label>
+                  <label className="block text-sm font-medium mb-2">Backtest timeout (s)</label>
                   <input
                     type="number"
                     value={config.backtestTimeout}
@@ -482,12 +482,12 @@ export const SettingsPage: React.FC = () => {
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    单次回测最大执行时间 (秒)
+                    Maximum runtime per backtest (s)
                   </p>
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-2">默认因子库名称后缀</label>
+                  <label className="block text-sm font-medium mb-2">Default factor library suffix</label>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground font-mono">all_factors_library_</span>
                     <input
@@ -497,20 +497,20 @@ export const SettingsPage: React.FC = () => {
                         const val = e.target.value.replace(/[^a-zA-Z0-9_\-]/g, '');
                         updateConfigField('defaultLibrarySuffix', val);
                       }}
-                      placeholder="例如 momentum_v1 (留空则无后缀)"
+                      placeholder="e.g. momentum_v1 (leave blank for no suffix)"
                       className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm font-mono focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                     />
                     <span className="text-sm text-muted-foreground font-mono">.json</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    生成的因子将保存到此文件。支持字母、数字、下划线。
+                    Generated factors will be saved to this file. Letters, digits, and underscores only.
                   </p>
                 </div>
               </div>
 
               <div className="pt-4 border-t border-border/50 space-y-4">
-                <h4 className="text-sm font-medium">高级控制</h4>
-                
+                <h4 className="text-sm font-medium">Advanced controls</h4>
+
                 <label className="flex items-center gap-3 cursor-pointer group p-3 rounded-lg border border-border/50 hover:bg-secondary/20 transition-all">
                   <input
                     type="checkbox"
@@ -520,10 +520,10 @@ export const SettingsPage: React.FC = () => {
                   />
                   <div className="flex-1">
                     <div className="font-medium group-hover:text-primary transition-colors">
-                      启用并行执行
+                      Enable parallel execution
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      允许多个挖掘方向同时运行，显著加快实验速度，但会增加系统负载
+                      Run multiple research directions simultaneously — significantly faster, at the cost of higher system load
                     </div>
                   </div>
                 </label>
@@ -537,10 +537,10 @@ export const SettingsPage: React.FC = () => {
                   />
                   <div className="flex-1">
                     <div className="font-medium group-hover:text-primary transition-colors">
-                      启用质量门控
+                      Enable quality gate
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      自动检测并过滤低质量因子，防止其进入下一轮迭代，保证最终结果质量
+                      Automatically detect and filter low-quality factors, preventing them from entering the next iteration and improving final result quality
                     </div>
                   </div>
                 </label>
@@ -555,15 +555,15 @@ export const SettingsPage: React.FC = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Compass className="h-5 w-5" />
-                挖掘方向（参考 Alpha158(20)）
+                Research directions (Alpha158(20) reference list)
               </CardTitle>
               <p className="text-sm text-muted-foreground mt-1">
-                选择作为默认参考的挖掘方向；启动任务时可从中选用或随机一条
+                Pick the default reference research directions. When you start a task, one of the selected directions is used (or a random one when random mode is enabled).
               </p>
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
-                <label className="block text-sm font-medium mb-3">使用方式</label>
+                <label className="block text-sm font-medium mb-3">Selection mode</label>
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -573,7 +573,7 @@ export const SettingsPage: React.FC = () => {
                       onChange={() => updateConfigField('miningDirectionMode', 'selected')}
                       className="h-4 w-4 text-primary focus:ring-primary"
                     />
-                    <span>使用下方选中的方向（启动时从选中中取一条或按业务逻辑使用）</span>
+                    <span>Use selected (pick one of the checked directions on start)</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -585,7 +585,7 @@ export const SettingsPage: React.FC = () => {
                     />
                     <span className="flex items-center gap-1.5">
                       <Shuffle className="h-4 w-4" />
-                      随机（从选中方向中随机选一条）
+                      Random (pick a random one from the selected directions)
                     </span>
                   </label>
                 </div>
@@ -593,7 +593,7 @@ export const SettingsPage: React.FC = () => {
 
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm font-medium">参考方向（可多选）</label>
+                  <label className="text-sm font-medium">Reference directions (multiple selection allowed)</label>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -605,14 +605,14 @@ export const SettingsPage: React.FC = () => {
                         );
                       }}
                     >
-                      全选
+                      Select all
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => updateConfigField('selectedMiningDirectionIndices', [])}
                     >
-                      取消全选
+                      Clear all
                     </Button>
                   </div>
                 </div>
@@ -643,7 +643,7 @@ export const SettingsPage: React.FC = () => {
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  已选 {config.selectedMiningDirectionIndices.length} / {REFERENCE_MINING_DIRECTIONS.length} 项。
+                  Selected: {config.selectedMiningDirectionIndices.length} / {REFERENCE_MINING_DIRECTIONS.length}
                 </p>
               </div>
             </CardContent>
@@ -656,8 +656,8 @@ export const SettingsPage: React.FC = () => {
         <CardContent className="p-4 flex gap-3">
           <div className="text-xl">💡</div>
           <div className="text-sm text-muted-foreground">
-            <p className="mb-1 font-medium text-foreground">配置提示</p>
-            <p>所有配置修改后会自动保存至后端环境文件及本地浏览器缓存。涉及 API 或路径的修改，建议在保存后重启相关服务以确保生效。</p>
+            <p className="mb-1 font-medium text-foreground">Configuration tip</p>
+            <p>All config changes are automatically persisted to the backend environment file and the local browser cache. For changes involving API keys or paths, restart the related services to ensure changes take effect.</p>
           </div>
         </CardContent>
       </Card>

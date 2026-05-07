@@ -21,11 +21,13 @@ the patches are no-ops on non-Windows.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import platform
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 
 
 def _patch_symlink_to_with_junction_fallback() -> None:
@@ -280,6 +282,133 @@ def _patch_local_env_no_poll() -> None:
     _patch_select_poll_windows()
 
 
+def _patch_qlib_conda_env_skip_prepare() -> None:
+    """Make QlibCondaEnv.prepare() a no-op on Windows.
+
+    rdagent's `QlibCondaEnv.prepare()` runs `conda create -y -n quantaalpha …`
+    and `conda run -n quantaalpha pip install …` to materialize a Conda env.
+    On a venv-based Windows install, `conda` isn't on PATH and the env
+    isn't needed (the current Python venv already has every package). The
+    prepare step prints "Failed to prepare conda env: …" but doesn't raise,
+    so it's harmless on its own — but the SUBSEQUENT subprocess call uses
+    a Linux PATH (see _patch_local_env_run_windows), so the run fails too.
+
+    Skipping prepare entirely on Windows avoids the noisy error messages
+    and the 1–2 seconds wasted shelling out to `conda env list`.
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        from rdagent.utils import env as _env
+    except Exception:
+        return
+
+    if hasattr(_env, "QlibCondaEnv") and not getattr(
+        _env.QlibCondaEnv, "_qa_windows_skip_prepare", False
+    ):
+        def _noop_prepare(self):  # noqa: ANN001
+            pass
+
+        _env.QlibCondaEnv.prepare = _noop_prepare
+        _env.QlibCondaEnv._qa_windows_skip_prepare = True
+
+
+def _patch_local_env_run_windows() -> None:
+    """Replace `LocalEnv._run` with a Windows-native version.
+
+    The upstream `_run` does:
+        path = [*self.conf.bin_path.split(":"), "/bin/", "/usr/bin/",
+                *env.get("PATH", "").split(":")]
+        env["PATH"] = ":".join(path)
+
+    On Windows that produces `PATH = :/bin/:/usr/bin/:` — total nonsense.
+    cmd.exe can't find `qrun.exe`, `python.exe`, or anything else in those
+    paths, so every subprocess call returns "'qrun' is not recognized" or
+    "'python' is not recognized". The result: the inline `factor_backtest`
+    step in mining produces empty `backtest_results: {}`.
+
+    This replacement uses the *real* Windows PATH plus the current Python
+    interpreter's `Scripts/` directory (so `qrun.exe` from the venv is
+    findable). Otherwise behaves like the upstream `_run` — runs the
+    entry as a subprocess, captures combined stdout+stderr, returns
+    (output, return_code).
+    """
+    if sys.platform != "win32":
+        return
+
+    try:
+        from rdagent.utils import env as _env
+    except Exception:
+        return
+
+    if not hasattr(_env, "LocalEnv"):
+        return
+
+    if getattr(_env.LocalEnv, "_qa_windows_run_native", False):
+        return
+
+    import subprocess as _sp
+
+    # Path that contains `qrun.exe`, `python.exe`, etc. when running inside
+    # the venv. sys.executable is something like
+    # `<project>/.venv/Scripts/python.exe` — its parent is the Scripts dir.
+    _venv_scripts = str(Path(sys.executable).parent)
+
+    def _run_windows_native(self, entry, local_path, env, running_extra_volume=None):  # noqa: ANN001
+        from rich.console import Console
+        from rich.rule import Rule
+        from rich.table import Table
+
+        # Build a sensible Windows env: inherit os.environ, layer caller env
+        # on top, prepend venv Scripts dir to PATH so `qrun.exe`/`python.exe`
+        # resolve correctly.
+        if env is None:
+            env = {}
+        merged_env = {**os.environ, **{k: str(v) if isinstance(v, int) else v for k, v in env.items()}}
+        merged_env["PATH"] = _venv_scripts + os.pathsep + merged_env.get("PATH", "")
+
+        cwd = Path(local_path).resolve() if local_path else None
+
+        print(Rule("[bold green]LocalEnv Logs Begin (Windows native)[/bold green]", style="dark_orange"))
+        table = Table(title="Run Info", show_header=False)
+        table.add_column("Key", style="bold cyan")
+        table.add_column("Value", style="bold magenta")
+        table.add_row("Entry", str(entry))
+        table.add_row("Local Path", str(local_path or ""))
+        table.add_row("Scripts dir", _venv_scripts)
+        print(table)
+
+        try:
+            result = _sp.run(
+                entry,
+                cwd=cwd,
+                env=merged_env,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=getattr(self.conf, "running_timeout_period", None) or 1800,
+            )
+            stdout = result.stdout or ""
+            stderr = result.stderr or ""
+            if stdout:
+                Console().print(stdout, end="", markup=False)
+            if stderr:
+                Console().print(stderr, end="", markup=False)
+            combined = stdout + stderr
+            return_code = result.returncode
+        except _sp.TimeoutExpired as exc:
+            combined = f"Timeout after {exc.timeout}s"
+            return_code = -1
+            Console().print(combined, end="", markup=False)
+
+        print(Rule("[bold green]LocalEnv Logs End[/bold green]", style="dark_orange"))
+        return combined, return_code
+
+    _env.LocalEnv._run = _run_windows_native
+    _env.LocalEnv._qa_windows_run_native = True
+
+
 def _patch_env_run_no_sh_wrap() -> None:
     """Skip rdagent's `/bin/sh -c '...'` wrapping on Windows.
 
@@ -426,6 +555,8 @@ def _apply_windows_patches() -> None:
     _patch_unlink_for_junctions()
     _patch_local_env_no_poll()
     _patch_env_run_no_sh_wrap()
+    _patch_local_env_run_windows()       # native Windows _run (proper PATH)
+    _patch_qlib_conda_env_skip_prepare()  # skip `conda create` step
     _patch_runtime_environment_probe()
 
 

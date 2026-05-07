@@ -147,12 +147,20 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
                 pd.set_option('display.width', 1000)
                 logger.info(f"Factor correlation: \n\n{combined_factors.corr()}\n")
 
-            # Sort and nest the combined factors under 'feature'
-            combined_factors = combined_factors.sort_index()
+            # Sort and nest the combined factors under 'feature'.
+            # Qlib's StaticDataLoader does df.loc[start_time:end_time], which slices the
+            # FIRST index level. If the parquet is saved with (instrument, datetime), the
+            # slice gets a Timestamp on the instrument level and pandas raises
+            # "TypeError: Level type mismatch". Force (datetime, instrument) order.
+            if combined_factors.index.names and combined_factors.index.names[0] != "datetime" \
+                    and "datetime" in combined_factors.index.names:
+                combined_factors = combined_factors.swaplevel().sort_index()
+            else:
+                combined_factors = combined_factors.sort_index()
             combined_factors = combined_factors.loc[:, ~combined_factors.columns.duplicated(keep="last")]
             new_columns = pd.MultiIndex.from_product([["feature"], combined_factors.columns])
             combined_factors.columns = new_columns
-            
+
             logger.info(f"Factor values this round: \n\n{combined_factors.tail()}\n\n")
 
             # Save the combined factors to the workspace (parquet format for qlib compatibility)
