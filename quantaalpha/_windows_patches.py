@@ -380,6 +380,13 @@ def _patch_local_env_run_windows() -> None:
         print(table)
 
         try:
+            # Force UTF-8 decoding with replace fallback. Without this, text=True
+            # uses locale.getpreferredencoding() which is cp1252 on most Windows
+            # installs, and qrun's stdout (rich box-drawing chars, Qlib log
+            # decorations) chokes inside subprocess's pipe-reader thread with a
+            # `codecs.charmap_decode` UnicodeDecodeError. The error is caught
+            # internally but its traceback leaks into the captured stdout —
+            # cosmetic clutter that confuses the UI's error filter.
             result = _sp.run(
                 entry,
                 cwd=cwd,
@@ -387,6 +394,8 @@ def _patch_local_env_run_windows() -> None:
                 shell=True,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=getattr(self.conf, "running_timeout_period", None) or 1800,
             )
             stdout = result.stdout or ""
