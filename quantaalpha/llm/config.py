@@ -64,5 +64,38 @@ class LLMSettings(ExtendedBaseSettings):
 
     chat_model_map: str = "{}"
 
+    # ── Claude Code subscription path (claude-agent-sdk) ────────────
+    # llm_provider: "openai" (default OpenAI-compatible), "claude_code"
+    # (route through local Claude Code session — uses Max subscription),
+    # or "anthropic" (direct Anthropic API — pay per token).
+    llm_provider: str = "openai"
+
+    # claude_code: max query() calls per session before opening a fresh one.
+    # Sessions accumulate context; rotating prevents unbounded prompt growth.
+    claude_code_max_turns_per_session: int = 30
+
+    # claude_code: cooldown after a rate-limit-classified error before
+    # the dispatcher retries the primary backend (seconds).
+    claude_code_rate_limit_cooldown: int = 300
+
+    # claude_code: fallback chain when subscription is exhausted.
+    #   "anthropic" -> use Anthropic API direct (pay per token)
+    #   "openai"    -> use the OpenAI-compatible config below
+    #   "none"      -> no fallback; raise on rate limit
+    claude_code_fallback: str = "anthropic"
+
+    # claude_code: which Claude model the session should use. None = let
+    # the local Claude Code default take over. Otherwise pass through to
+    # ClaudeAgentOptions(model=...).
+    claude_code_model: str | None = None
+
+    # claude_code: bypass FS/Bash/Web tool permission prompts. Always set
+    # because we want pure inference, no tool calls.
+    claude_code_disable_tools: bool = True
+
+    # ── Anthropic API direct (used as claude_code fallback or standalone) ──
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-sonnet-4-6"
+
 
 LLM_SETTINGS = LLMSettings()

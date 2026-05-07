@@ -268,6 +268,51 @@ class AlphaAgentLoop(LoopBase, metaclass=LoopMeta):
         }
 
 
+# ── Claude-Code session pinning ────────────────────────────────────────────
+# Wrap LoopBase.run() so each AlphaAgentLoop branch flows through ONE Claude
+# Code conversation (the 5-step inner loop benefits from prompt-cache reuse).
+#
+# IMPORTANT: this wrapper is assigned AFTER the class body. If we put `def run`
+# inside the class, LoopMeta's metaclass auto-registers it as a workflow step
+# (any non-underscore callable in the class body becomes a step), which causes
+# infinite recursion when the runner invokes the "run" step. Assigning here
+# avoids that.
+
+_loopbase_run = LoopBase.run
+
+
+def _alphaagent_run_with_session(self, step_n=None, stop_event=None):
+    from quantaalpha.llm.config import LLM_SETTINGS
+
+    if LLM_SETTINGS.llm_provider != "claude_code":
+        return _loopbase_run(self, step_n=step_n, stop_event=stop_event)
+
+    from quantaalpha.llm.claude_code_backend import (
+        get_global_backend,
+        reset_session_key,
+        set_session_key,
+    )
+
+    branch_key = (
+        getattr(self, "trajectory_id", None)
+        or f"branch_dir{getattr(self, 'direction_id', 0):02d}"
+        f"_round{getattr(self, 'round_idx', 0):02d}"
+    )
+    token = set_session_key(branch_key)
+    logger.info(f"[ClaudeCode] pinning branch '{branch_key}' for run")
+    try:
+        return _loopbase_run(self, step_n=step_n, stop_event=stop_event)
+    finally:
+        reset_session_key(token)
+        try:
+            get_global_backend().close_session(branch_key)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(f"[ClaudeCode] close_session failed: {exc}")
+
+
+AlphaAgentLoop.run = _alphaagent_run_with_session
+
+
 
 
 class BacktestLoop(LoopBase, metaclass=LoopMeta):
