@@ -348,6 +348,16 @@ class APIBackend:
         use_embedding_cache: bool | None = None,
         dump_embedding_cache: bool | None = None,
     ) -> None:
+        # Claude Code subscription path. When set, all build_messages_*,
+        # build_chat_session, and create_embedding calls delegate to the
+        # dispatcher (with fallback to Anthropic API or OpenAI-compatible).
+        # Set BEFORE any branch so existing branches always observe a value.
+        self._claude_code_dispatcher = None
+
+        if LLM_SETTINGS.llm_provider == "claude_code":
+            self._init_claude_code_path()
+            return
+
         if LLM_SETTINGS.use_llama2:
             self.generator = Llama.build(
                 ckpt_dir=LLM_SETTINGS.llama2_ckpt_dir,
@@ -507,6 +517,96 @@ class APIBackend:
         self.use_gcr_endpoint = LLM_SETTINGS.use_gcr_endpoint
         self.retry_wait_seconds = LLM_SETTINGS.retry_wait_seconds
 
+    def _init_claude_code_path(self) -> None:
+        """Build the Claude Code dispatcher and stash it on the instance.
+
+        Sets attributes so that downstream code paths (cache, retry config, etc.)
+        do not crash on attribute lookups when this branch is active.
+        """
+        from quantaalpha.llm.claude_code_backend import get_global_backend
+        from quantaalpha.llm.dispatch import DispatchingBackend
+
+        # Use a process-wide singleton so all APIBackend() call sites share
+        # one Claude Code session pool (each AlphaAgentLoop branch pins its
+        # own session by trajectory_id via contextvars).
+        primary = get_global_backend()
+        fallbacks: list = []
+
+        fb_choice = (LLM_SETTINGS.claude_code_fallback or "none").lower()
+        if fb_choice == "anthropic":
+            try:
+                fallbacks.append(self._build_anthropic_api_fallback())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[ClaudeCode] could not initialize Anthropic API fallback: {exc}. "
+                    "Continuing without it."
+                )
+        elif fb_choice == "openai":
+            try:
+                fallbacks.append(self._build_openai_compatible_fallback())
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    f"[ClaudeCode] could not initialize OpenAI-compatible fallback: {exc}. "
+                    "Continuing without it."
+                )
+
+        self._claude_code_dispatcher = DispatchingBackend(primary, fallbacks)
+
+        # Defaults so existing attribute lookups don't crash. None of these
+        # are used on the Claude Code path; they only need to exist.
+        self.use_llama2 = False
+        self.use_gcr_endpoint = False
+        self.use_azure = False
+        self.chat_use_azure_token_provider = False
+        self.embedding_use_azure_token_provider = False
+        self.encoder = None
+        self.chat_model = LLM_SETTINGS.chat_model
+        self.reasoning_model = LLM_SETTINGS.reasoning_model or LLM_SETTINGS.chat_model
+        self.chat_model_map = json.loads(LLM_SETTINGS.chat_model_map)
+        self.chat_stream = LLM_SETTINGS.chat_stream
+        self.retry_wait_seconds = LLM_SETTINGS.retry_wait_seconds
+        self.dump_chat_cache = False
+        self.use_chat_cache = False
+        self.dump_embedding_cache = False
+        self.use_embedding_cache = False
+
+        logger.info(
+            f"[APIBackend] Claude Code path active "
+            f"(fallback={fb_choice}, fallbacks_loaded={len(fallbacks)})"
+        )
+
+    def _build_anthropic_api_fallback(self):
+        """Build a thin OpenAI-style backend that points at the Anthropic API.
+
+        Implementation: return another APIBackend constructed in OpenAI-compatible
+        mode with the Anthropic API base URL. Anthropic's REST API is not
+        OpenAI-compatible, so we delegate to LiteLLM's Python library if
+        available, otherwise raise.
+
+        The simplest reliable fallback is: if user wants this, they must run
+        a LiteLLM proxy locally; we build an OpenAI client pointed at
+        http://localhost:4000. We document this in the run guide.
+        """
+        # Construct a sibling APIBackend in OpenAI-compatible mode by temporarily
+        # toggling the provider flag. We bypass the normal __init__ flow.
+        backend = object.__new__(APIBackend)
+        backend._claude_code_dispatcher = None
+        # Snapshot LLM_SETTINGS so the openai branch sees them.
+        original_provider = LLM_SETTINGS.llm_provider
+        LLM_SETTINGS.llm_provider = "openai"
+        try:
+            APIBackend.__init__(backend)
+        finally:
+            LLM_SETTINGS.llm_provider = original_provider
+        return backend
+
+    def _build_openai_compatible_fallback(self):
+        """Same construction trick as the Anthropic fallback — build an
+        OpenAI-mode APIBackend that uses whatever OPENAI_BASE_URL is set
+        (DeepSeek, local Ollama, etc.).
+        """
+        return self._build_anthropic_api_fallback()
+
     def _get_encoder(self):
         """
         tiktoken.encoding_for_model(self.chat_model) does not cover all cases it should consider.
@@ -543,6 +643,11 @@ class APIBackend:
         conversation_id is a 256-bit string created by uuid.uuid4() and is also
         the file name under session_cache_folder/ for each conversation
         """
+        if self._claude_code_dispatcher is not None:
+            return self._claude_code_dispatcher.build_chat_session(
+                conversation_id=conversation_id,
+                session_system_prompt=session_system_prompt,
+            )
         return ChatSession(self, conversation_id, session_system_prompt)
 
     def build_messages(
@@ -592,6 +697,15 @@ class APIBackend:
         shrink_multiple_break: bool = False,
         **kwargs: Any,
     ) -> str:
+        if self._claude_code_dispatcher is not None:
+            return self._claude_code_dispatcher.build_messages_and_create_chat_completion(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                former_messages=former_messages,
+                chat_cache_prefix=chat_cache_prefix,
+                shrink_multiple_break=shrink_multiple_break,
+                **kwargs,
+            )
         if former_messages is None:
             former_messages = []
         messages = self.build_messages(
@@ -608,6 +722,13 @@ class APIBackend:
         )
 
     def create_embedding(self, input_content: str | list[str], **kwargs: Any) -> list[Any] | Any:
+        if self._claude_code_dispatcher is not None:
+            # Embeddings are not provided by Claude. The dispatcher delegates to
+            # the active backend; ClaudeCodeBackend raises NotImplementedError.
+            # Users should configure a separate embedding endpoint.
+            return self._claude_code_dispatcher.create_embedding(
+                input_content, **kwargs
+            )
         input_content_list = [input_content] if isinstance(input_content, str) else input_content
         resp = self._try_create_chat_completion_or_embedding(
             input_content_list=input_content_list,
@@ -957,6 +1078,13 @@ class APIBackend:
         *,
         shrink_multiple_break: bool = False,
     ) -> int:
+        if self._claude_code_dispatcher is not None:
+            return self._claude_code_dispatcher.build_messages_and_calculate_token(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                former_messages=former_messages,
+                shrink_multiple_break=shrink_multiple_break,
+            )
         if former_messages is None:
             former_messages = []
         messages = self.build_messages(

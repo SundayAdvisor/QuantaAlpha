@@ -99,6 +99,8 @@ yarn-error.log*
 alphaagent.egg-info/
 quantaalpha.egg-info/
 git_ignore_folder/
+hf_data/
+pickle_cache/
 home/
 saved_mlruns/
 factor_zoo/

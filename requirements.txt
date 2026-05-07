@@ -30,6 +30,8 @@ scikit-learn>=1.3          # Clustering (KMeans), similarity, preprocessing
 langchain-community        # Community packages only, not main langchain
 tiktoken                   # Token counting and segmentation
 pymupdf                    # PDF parsing (import fitz)
+claude-agent-sdk           # Optional: route LLM calls through local Claude Code session
+                           # (only used when LLM_PROVIDER=claude_code in .env)
 
 # -----------------------------------------------------------------------------
 # Azure (document analysis)
