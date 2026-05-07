@@ -213,16 +213,22 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
         os.makedirs(env["WORKSPACE_PATH"], exist_ok=True)
         os.makedirs(env["PICKLE_CACHE_FOLDER_PATH_STR"], exist_ok=True)
 
-        # Qlib symlink
+        # Qlib symlink (best-effort; YAML now uses absolute provider_uri so this is
+        # only kept for backwards-compat with rdagent code paths that hardcode
+        # ~/.qlib/qlib_data/cn_data). Skip silently if it already exists or fails —
+        # on Windows the path may be a junction from `_windows_patches`, in which
+        # case is_symlink() is False but the path can't be re-created without
+        # removing the junction first. Failure here must not kill mining.
         qlib_data = dotenv.get("QLIB_DATA_DIR", "")
         if qlib_data:
-            qlib_symlink_dir = Path.home() / ".qlib" / "qlib_data"
-            qlib_symlink_dir.mkdir(parents=True, exist_ok=True)
-            cn_data_link = qlib_symlink_dir / "cn_data"
-            if not cn_data_link.exists() or os.readlink(str(cn_data_link)) != qlib_data:
-                if cn_data_link.is_symlink():
-                    cn_data_link.unlink()
-                cn_data_link.symlink_to(qlib_data)
+            try:
+                qlib_symlink_dir = Path.home() / ".qlib" / "qlib_data"
+                qlib_symlink_dir.mkdir(parents=True, exist_ok=True)
+                cn_data_link = qlib_symlink_dir / "cn_data"
+                if not cn_data_link.exists():
+                    cn_data_link.symlink_to(qlib_data)
+            except OSError:
+                pass
 
         # Build a temporary config with frontend parameter overrides
         base_config_path = PROJECT_ROOT / "configs" / "experiment.yaml"
