@@ -1,8 +1,10 @@
 # =============================================================================
 # QuantaAlpha small backtest config - baseline (first round, base factors only)
 #
-# Same preprocessing and model params as combined-factor version;
-# uses QlibDataLoader only (no mined factors).
+# Same preprocessing and model params as combined-factor version, and the
+# same Alpha158DL 20-feature curated subset — so baseline vs combined is
+# apples-to-apples and the IC delta attributes to mined factors. No mined
+# factors here (no parquet, no NestedDataLoader).
 # =============================================================================
 
 qlib_init:
@@ -14,18 +16,27 @@ benchmark: &benchmark ^gspc
 
 data_handler_config: &data_handler_config
     start_time: "2008-01-02"
-    end_time: "2020-11-05"
+    end_time: "2020-11-10"
     instruments: *market
     data_loader:
-        class: qlib.contrib.data.loader.QlibDataLoader
+        class: qlib.contrib.data.loader.Alpha158DL
         kwargs:
             config:
-                feature:
-                    - ["($close-$open)/$open", "$volume/Mean($volume, 20)", "($high-$low)/Ref($close, 1)", "$close/Ref($close, 1)-1"]
-                    - ["OPEN_RET", "VOL_RATIO", "RANGE_RET", "CLOSE_RET"]
                 label:
                     - ["Ref($close, -2)/Ref($close, -1) - 1"]
                     - ["LABEL0"]
+                feature:
+                    - ["Resi($close, 5)/$close", "Std(Abs($close/Ref($close, 1)-1)*$volume, 5)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 5)+1e-12)",
+                       "Rsquare($close, 5)", "($high-$low)/$open", "Rsquare($close, 10)", "Corr($close, Log($volume+1), 5)",
+                       "Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 5)", "Corr($close, Log($volume+1), 10)",
+                       "Ref($close, 60)/$close", "Resi($close, 10)/$close", "Std($volume, 5)/($volume+1e-12)",
+                       "Rsquare($close, 60)", "Corr($close, Log($volume+1), 60)", "Std(Abs($close/Ref($close, 1)-1)*$volume, 60)/(Mean(Abs($close/Ref($close, 1)-1)*$volume, 60)+1e-12)",
+                       "Std($close, 5)/$close", "Rsquare($close, 20)", "Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 60)",
+                       "Corr($close/Ref($close,1), Log($volume/Ref($volume, 1)+1), 10)", "Corr($close, Log($volume+1), 20)",
+                       "(Less($open, $close)-$low)/$open"]
+                    - ["RESI5", "WVMA5", "RSQR5", "KLEN", "RSQR10", "CORR5", "CORD5", "CORR10",
+                       "ROC60", "RESI10", "VSTD5", "RSQR60", "CORR60", "WVMA60", "STD5",
+                       "RSQR20", "CORD60", "CORD10", "CORR20", "KLOW"]
 
     learn_processors:
         - class: Fillna
@@ -59,8 +70,8 @@ port_analysis_config: &port_analysis_config
             topk: 50
             n_drop: 5
     backtest:
-        start_time: "2018-01-02"
-        end_time: "2018-12-31"
+        start_time: "2017-01-03"
+        end_time: "2020-11-04"   # leave buffer for t+2 label at calendar end (2020-11-10)
         account: 100000000
         benchmark: *benchmark
         exchange_kwargs:
@@ -68,7 +79,7 @@ port_analysis_config: &port_analysis_config
             limit_threshold: null
             deal_price: open
             open_cost: 0.0005
-            close_cost: 0.0015
+            close_cost: 0.0005   # US: commission only (China stamp duty doesn't apply)
             min_cost: 5
 
 task:
@@ -97,9 +108,9 @@ task:
                 module_path: qlib.contrib.data.handler
                 kwargs: *data_handler_config
             segments:
-                train: ["2008-01-02", "2016-12-30"]
-                valid: ["2017-01-03", "2017-12-29"]
-                test: ["2018-01-02", "2018-12-31"]
+                train: ["2008-01-02", "2015-12-31"]
+                valid: ["2016-01-04", "2016-12-30"]
+                test: ["2017-01-03", "2020-11-04"]
 
     record:
         - class: SignalRecord

@@ -148,7 +148,7 @@ qlib_factor_from_report_rich_style_description : |-
 qlib_factor_experiment_setting: |-
   | Dataset 📊 | Model 🤖    | Factors 🌟       | Data Split  🧮                                   |
   |---------|----------|---------------|-------------------------------------------------|
-  | S&P 500 | LGBModel | Custom price-volume factors | Train: 2008-01-02 to 2017-12-29 <br> Valid: 2018-01-02 to 2018-12-31 <br> Test &nbsp;: 2019-01-02 to 2020-11-05 |
+  | S&P 500 | LGBModel | Alpha158 (20-feature curated subset) + mined factors | Train: 2008-01-02 to 2017-12-29 <br> Valid: 2018-01-02 to 2018-12-31 <br> Test &nbsp;: 2019-01-02 to 2020-11-05 |
 
 
 qlib_model_background: |-
@@ -239,4 +239,4 @@ qlib_model_rich_style_description: |-
 qlib_model_experiment_setting: |-
   | Dataset 📊 | Model 🤖    | Factors 🌟       | Data Split  🧮                                   |
   |---------|----------|---------------|-------------------------------------------------|
-  | S&P 500 | QuantaAlpha-dev | Custom price-volume factors | Train: 2008-01-02 to 2017-12-29 <br> Valid: 2018-01-02 to 2018-12-31 <br> Test &nbsp;: 2019-01-02 to 2020-11-05 |
+  | S&P 500 | QuantaAlpha-dev | Alpha158 (20-feature curated subset) + mined factors | Train: 2008-01-02 to 2017-12-29 <br> Valid: 2018-01-02 to 2018-12-31 <br> Test &nbsp;: 2019-01-02 to 2020-11-05 |

@@ -237,8 +237,8 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : (config.userInput && config.userInput.trim()) || getDefaultMiningDirection() || 'Price-volume factor mining';
         const resp = await apiStartMining({
           direction,
-          numDirections: config.numDirections || defaults.defaultNumDirections || 2,
-          maxRounds: config.maxRounds || defaults.defaultMaxRounds || 3,
+          numDirections: config.numDirections || defaults.defaultNumDirections || 10,
+          maxRounds: config.maxRounds || defaults.defaultMaxRounds || 5,
           librarySuffix: config.librarySuffix || defaults.defaultLibrarySuffix || undefined,
           qualityGateEnabled: config.qualityGateEnabled ?? defaults.qualityGateEnabled ?? true,
           parallelEnabled: config.parallelExecution ?? defaults.parallelExecution ?? false,
@@ -307,7 +307,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
         progress: {
           phase: 'parsing',
           currentRound: 0,
-          totalRounds: config.maxRounds || 7,
+          totalRounds: config.maxRounds || 5,
           progress: 0,
           message: 'Parsing user request…',
           timestamp: new Date().toISOString(),
@@ -377,7 +377,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
             progress: {
               phase: phase as any,
               currentRound: round,
-              totalRounds: config.maxRounds || 7,
+              totalRounds: config.maxRounds || 5,
               progress,
               message: msg,
               timestamp: new Date().toISOString(),

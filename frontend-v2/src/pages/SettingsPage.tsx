@@ -34,9 +34,9 @@ const DEFAULT_CONFIG: SystemConfig = {
   modelName: 'deepseek-v3',
   qlibDataPath: '',
   resultsDir: '',
-  defaultNumDirections: 2,
-  defaultMaxRounds: 3,
-  defaultMarket: 'csi300',
+  defaultNumDirections: 10,    // paper Appendix B: Ninit=10
+  defaultMaxRounds: 5,         // paper Appendix B: 5 main iterations
+  defaultMarket: 'sp500',      // matches conf YAMLs (no CN data in this bundle)
   parallelExecution: true,
   qualityGateEnabled: true,
   backtestTimeout: 600,
@@ -97,9 +97,9 @@ export const SettingsPage: React.FC = () => {
           modelName: env.CHAT_MODEL || DEFAULT_CONFIG.modelName,
           qlibDataPath: env.QLIB_DATA_DIR || '',
           resultsDir: env.DATA_RESULTS_DIR || '',
-          defaultNumDirections: 2,
-          defaultMaxRounds: 3,
-          defaultMarket: 'csi300',
+          defaultNumDirections: 10,
+          defaultMaxRounds: 5,
+          defaultMarket: 'sp500',
           parallelExecution: true,
           qualityGateEnabled: true,
           backtestTimeout: 600,

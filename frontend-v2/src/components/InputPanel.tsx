@@ -14,9 +14,9 @@ export const InputPanel: React.FC<InputPanelProps> = ({ onSubmit, isRunning }) =
   const [userInput, setUserInput] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [config, setConfig] = useState<Partial<TaskConfig>>({
-    numDirections: 2,
-    maxRounds: 7,
-    market: 'csi500',
+    numDirections: 10,    // paper Appendix B: Ninit=10
+    maxRounds: 5,         // paper Appendix B: 5 main iterations
+    market: 'sp500',      // matches conf YAMLs
     parallelExecution: true,
     qualityGateEnabled: true,
   });

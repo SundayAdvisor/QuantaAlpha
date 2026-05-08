@@ -134,12 +134,28 @@ class QlibFactorRunner(CachedRunner[QlibFactorExperiment]):
             if new_factors.empty:
                 raise FactorEmptyError("No valid factor data found to merge.")
 
-            # Combine the SOTA factor and new factors if SOTA factor exists
-            if False: # SOTA_factor is not None and not SOTA_factor.empty:
-                new_factors = self.deduplicate_new_factors(SOTA_factor, new_factors)
-                if new_factors.empty:
-                    raise FactorEmptyError("No valid factor data found to merge.")
+            # Combine the SOTA factor and new factors if SOTA factor exists.
+            # SOTA_factor accumulates admitted factors from prior iterations.
+            # Apply paper §5.5 admission rule (greedy + |corr|<0.7 + 50% cap)
+            # so the cumulative pool stays diverse and bounded.
+            from quantaalpha.pipeline.evolution.admission import apply_default_admission
+            if SOTA_factor is not None and not SOTA_factor.empty:
                 combined_factors = pd.concat([SOTA_factor, new_factors], axis=1).dropna()
+                # Drop exact-duplicate columns from concat (same factor name in both sets)
+                combined_factors = combined_factors.loc[:, ~combined_factors.columns.duplicated(keep="first")]
+                pre_n = len(combined_factors.columns)
+                combined_factors = apply_default_admission(
+                    combined_factors,
+                    rank_ics=None,  # no per-iteration RankICs threaded through yet
+                    corr_threshold=0.7,
+                    cap_ratio=0.5,
+                )
+                logger.info(
+                    f"Admission filter: cumulative pool {pre_n} → "
+                    f"{len(combined_factors.columns)} factors (corr<0.7, cap=50%)"
+                )
+                if combined_factors.empty:
+                    raise FactorEmptyError("Admission filter rejected all factors.")
             else:
                 combined_factors = new_factors
                 
