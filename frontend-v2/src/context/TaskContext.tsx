@@ -24,6 +24,7 @@ import {
   cancelBacktest as apiCancelBacktest,
   connectMiningWs,
   healthCheck,
+  listTasks,
 } from '@/services/api';
 import type { BacktestStartParams } from '@/services/api';
 import { getDefaultMiningDirection } from '@/utils/miningDirections';
@@ -423,6 +424,67 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     },
     [backendAvailable, startRealMining, startMockMining],
   );
+
+  // ── Restore in-flight mining task on FE mount ──────────────────────────
+  // The task lives in backend memory; if the user refreshes the browser or
+  // opens a new tab, the React context is empty and they lose the link to
+  // the running run. Query backend's tasks/list, find any "running" mining
+  // task, restore it into context + reconnect WebSocket. Pure additive —
+  // does NOT affect the running mining subprocess.
+  useEffect(() => {
+    if (backendAvailable !== true) return;     // wait until health check confirms
+    if (miningTask !== null) return;            // already have one (e.g., user just started)
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await listTasks();
+        if (cancelled || !res.success || !res.data) return;
+        const running = (res.data.tasks || []).find(
+          (t: any) => t?.status === 'running' && t?.taskId
+        );
+        if (!running) return;
+        // Hydrate context + reconnect WS so the dashboard becomes reachable
+        setMiningTask(running as Task);
+        if (running.metrics) {
+          // Don't reset metrics — they reflect what the backend has accumulated
+        }
+        const ws = connectMiningWs(
+          running.taskId,
+          handleMiningWsMessage,
+          () => {
+            getMiningStatus(running.taskId).then((r) => {
+              if (r.data?.task) setMiningTask(r.data.task as Task);
+            });
+          },
+        );
+        miningWsRef.current = ws;
+        // Light polling fallback for completion detection
+        miningPollingRef.current = setInterval(async () => {
+          try {
+            const r = await getMiningStatus(running.taskId);
+            if (r.data?.task) {
+              const t = r.data.task as Task;
+              if (t.status === 'completed' || t.status === 'failed') {
+                setMiningTask(t);
+                if (miningPollingRef.current) {
+                  clearInterval(miningPollingRef.current);
+                  miningPollingRef.current = null;
+                }
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }, 5000);
+      } catch {
+        // Silent — restore is best-effort
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [backendAvailable]);
 
   // Stop mining
   const stopMining = useCallback(async () => {
