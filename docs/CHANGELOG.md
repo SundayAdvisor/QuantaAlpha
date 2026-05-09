@@ -1,5 +1,40 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (latest+1) — Research pipeline doc enriched with 2024-26 quant ecosystem survey
+
+**Updated** [docs/research_pipeline.md](research_pipeline.md):
+
+- New "Renaissance principles worth borrowing" section: 5-row table
+  mapping their public methodology (signal stacking / HMM regime detection
+  / 2-yr model lifecycle / cointegration / intraday HFT) to our stack —
+  what we do already, what to add, what's not replicable.
+- New "Step 0 — Statistical-rigor upgrades" at the top of the build
+  sequence: highest-ROI items from López de Prado's *Advances in Financial
+  Machine Learning* — Deflated Sharpe Ratio, Combinatorial Purged CV,
+  triple-barrier labeling, AST-similarity dedup. ~1 day total, biggest
+  near-term impact on factor-mining honesty. Should ship before any
+  other new stages.
+- Added Step 3 (HMM regime layer, ~50 lines hmmlearn) and Step 5
+  (FinBERT sentiment on EDGAR 8-Ks) to the sequence.
+- New "Reference reading & open-source ecosystem" section covering:
+  * 11 LLM-in-quant frameworks ranked verdict (RD-Agent, AlphaAgent,
+    TradingAgents, FactorMAD, AlphaSAGE, FinGPT, FinBERT, FinMem, FinRL,
+    FinRobot, Alpha-R1) with GitHub URLs
+  * Classical ML state of 2025 (LightGBM/XGBoost/CatBoost, TFT, N-BEATS,
+    Mamba/SSM with citations)
+  * Math foundations table (HMM, Kalman, Johansen, MI, DSR, CPCV, causal)
+  * Backtest framework comparison (qlib, Lean, vectorbt, NautilusTrader,
+    RiskFolio-Lib, skfolio, alphalens-reloaded, quantstats)
+  * Alt-data sources free vs paid (EDGAR + GDELT + Reddit free tier
+    covers ~80%; premium panels not worth it for solo builders)
+  * Reading list: López de Prado canon (AFML, MLAM, Causal), Stefan
+    Jansen's ML4Trading repo, Zuckerman's Renaissance book, plus
+    aggregators (Quantocracy, AQR, Alpha Architect), podcasts (Flirting
+    With Models, Acquired RT episode), and people-to-follow on X.
+
+This is reference material, not a build commitment. Use as the index
+to consult when picking what to add next.
+
 ## 2026-05-09 (latest) — Full research pipeline plan documented
 
 **Sketched (planned, not built)**

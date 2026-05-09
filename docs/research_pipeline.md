@@ -123,10 +123,32 @@ Free / ethical sources only (no SSRN scraping — TOS issues):
 | **NBER working papers** | Free RSS | Top finance/economics WPs | Weekly |
 | **Federal Reserve papers** | Free | FEDS papers | Weekly |
 | **AlphaArchitect blog** | Free RSS | Curated weekly factor summaries | Weekly |
+| **Quantocracy** | Free aggregator ([quantocracy.com](https://quantocracy.com)) | Best-in-class daily curated mashup of practitioner blogs | Daily |
+| **AQR research library** | Free ([aqr.com/Insights](https://www.aqr.com/Insights)) | Best public research from any quant fund | Weekly |
 | **Twitter/X quant accounts** | API limited | Noisy but timely | Real-time |
-| **Quantpedia** | Paid (~$300–500/yr) | ~500 curated anomaly factors with PDFs + replication code | Weekly |
+| **Quantpedia** | Paid (~$300–500/yr) | ~7K+ curated strategy entries with PDFs + replication code | Weekly |
 
-Free baseline coverage: arXiv + Semantic Scholar + NBER + AlphaArchitect = ~80% of academic factor flow. Buildable in 1–2 days.
+Free baseline coverage: arXiv + Semantic Scholar + NBER + AlphaArchitect + Quantocracy = ~80% of academic factor flow. Buildable in 1–2 days.
+
+---
+
+## Renaissance principles worth borrowing
+
+What's publicly knowable from Zuckerman's *The Man Who Solved the Market*
+(2019) and the Acquired podcast's 4-hour Renaissance episode (March 2024).
+The *machinery* (microsecond execution, $100B+ data infra, 300+ PhDs) isn't
+replicable by a small team — but the *philosophy* mostly is, and our stack
+already embodies parts of it:
+
+| Renaissance principle | Their version | Our analogue / what to add |
+|---|---|---|
+| **Signal stacking over silver bullets** | 1000s of weak, low-correlation signals; portfolio aggregates | QA's `balanced_composite` + factor pool capped at 50% admission ratio matches. Add: **deduplication by AST + IC-correlation** to enforce low correlation between admitted factors (AlphaAgent regularizer). |
+| **HMM-based regime detection** | Robert Mercer + Peter Brown brought Baum-Welch/HMM from IBM speech; hidden states ≈ market regimes | Not in our stack today. Add: small `hmmlearn`-based regime detector (2-3 states on SPY returns + VIX) as a strategy-level on/off gate. ~50 lines. |
+| **Models reinvent every ~2 years** | Continuous re-mining is the strategy, not "find the holy formula" | Our Mining → Refine → Optimize → Promote loop matches. Phase 9 (decay monitoring) closes this loop. |
+| **Stat-arb / pairs / cointegration as bread and butter** | Multi-asset basket trades on cointegrated spreads | Not in our stack. Add via `statsmodels.tsa.vector_ar.vecm.coint_johansen` + Kalman filter for time-varying hedge ratios. |
+| **Short-horizon, high-leverage intraday** | Medallion is mostly intraday futures/equities | NOT replicable for outsiders without low-latency infra + commission relief. Don't try to copy. |
+
+**Net**: Renaissance = signal-stacking + regime-aware allocation + continuous redevelopment. Three of those four are doable in our stack with focused work; intraday HFT isn't and shouldn't be a goal.
 
 ---
 
@@ -179,6 +201,23 @@ repos/QuantaResearch/
 
 ## Recommended build sequence
 
+### Step 0 — Statistical-rigor upgrades to existing pipeline (highest ROI, ~1 day)
+
+Before building anything new, harden the existing factor-mining gate.
+Sourced from López de Prado's *Advances in Financial Machine Learning*
+— the canonical text for ML-in-finance methodology:
+
+| Upgrade | What it fixes | Effort | Citation |
+|---|---|---|---|
+| **Deflated Sharpe Ratio (DSR)** as a gate | When you mine 100s of factors and report the best Sharpe, naive Sharpe drastically overstates the edge. DSR corrects for selection bias + non-normality + number of trials. | ~30 lines NumPy | Bailey & López de Prado, SSRN 2460551 (2014) |
+| **Combinatorial Purged Cross-Validation (CPCV)** | Walk-forward CV leaks information when label horizons overlap. CPCV is the standard fix. | ~half day | López de Prado, *AFML* ch. 7 |
+| **Triple-barrier labeling** | Better than fixed-horizon return labels — defines profit-take + stop-loss + time-out as the label boundaries. Closer to how a strategy actually exits. | ~half day | *AFML* ch. 3 |
+| **AST-similarity dedup** at admission | Prevents factor pool collapse around a single mechanism (we hit this around iteration 11–12 in our runs). Borrowed from AlphaAgent (arXiv 2502.16789). | ~half day | AlphaAgent paper |
+
+Implement in `quantaalpha/factors/admission.py` and the gate config of
+`scripts/publish_findings.py`. **This is the cheapest, highest-impact
+work in the entire pipeline plan.** Do this before adding new stages.
+
 ### Step 1 — Minimal QuantaResearch (stages 0 + 1)
 
 `arxiv_crawler.py` + `formalize_hypothesis.py` + integration that POSTs
@@ -196,7 +235,15 @@ hypotheses before they hit QA. ~4 hours.
 **Outputs**: `ideas_ready/` only contains hypotheses that QA can actually
 test. No more wasted runs on missing $vwap, etc.
 
-### Step 3 — Stage 5 (risk decomposition)
+### Step 3 — HMM regime layer (Renaissance-inspired)
+
+Tiny `hmmlearn`-based regime detector. 2–3 states on SPY returns + VIX
++ realized vol. Output a regime probability used as a strategy-level
+gate (don't trade aggressively in turbulent regime). ~50 lines, ~half
+day. Promote-trial through Lean and compare gated-vs-ungated to verify
+it adds Sharpe. If yes, expose as a feature flag in strategies.
+
+### Step 4 — Stage 5 (risk decomposition)
 
 Once a QA bundle exists, regress its daily predictions against
 Fama-French factors (Mkt-Rf, SMB, HML, MOM, RMW, CMA). The "true alpha"
@@ -207,7 +254,14 @@ is the regression intercept (residual return). Cheap with statsmodels.
 'alpha' is 80% explained by SMB + MOM" or "this factor's residual
 alpha is 0.3% annualized after FF5 — real edge."
 
-### Step 4 — Defer stages 9 + 10
+### Step 5 — FinBERT sentiment on EDGAR 8-Ks
+
+Free, real signal, low-effort. `edgartools` (https://github.com/dgunning/edgartools)
++ FinBERT (https://finbert.org) classifier → ticker-day sentiment score
+→ pre-computed feature in qlib custom-feature dir. ~1 day. Adds an
+NLP-derived feature stream to the factor mining loop.
+
+### Step 6 — Defer stages 9 + 10
 
 They need accumulated runs + live deployment first. Build when:
 - 9: QC Phase 11 (paper trading) actually runs — i.e., we have a live
@@ -254,6 +308,102 @@ several dozen ideas, never go to mode 3.
   between "passes our 5 gates" and "real money OOS" is large. Keep
   stages 8/9 manual until you've verified ≥3 strategies survive 6+
   months of paper trading.
+
+---
+
+## Reference reading & open-source ecosystem
+
+Curated 2024–2026 survey. Each entry: what it is, why we'd care, alternative.
+
+### LLM-in-quant frameworks worth knowing
+
+| Project | What | Why care | Verdict |
+|---|---|---|---|
+| **RD-Agent** ([microsoft/RD-Agent](https://github.com/microsoft/RD-Agent), arXiv 2505.15155) | Microsoft's production-grade R&D agent; 5-unit decomposition (Specification/Synthesis/Implementation/Validation/Analysis) joint factor + model optimization. Ships bolted onto qlib. | Closest architectural reference for our pipeline. Steal patterns; don't switch off our stack. | **Required reading** |
+| **AlphaAgent** ([RndmVariableQ/AlphaAgent](https://github.com/RndmVariableQ/AlphaAgent), arXiv 2502.16789) | Three regularizers vs alpha decay: AST-novelty, hypothesis-factor alignment, AST-complexity caps. ~81% hit-ratio improvement on CN/US. | Plug-in-able into our Refine phase. The AST-novelty regularizer is what we'd add. | **Required reading** |
+| **TradingAgents** ([TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents), arXiv 2412.20138) | 7 specialized agents (Fundamentals/Sentiment/News/Technical/Researcher/Trader/Risk Manager) on LangGraph. Multi-LLM (OpenAI/Anthropic/Google/xAI/DeepSeek/Qwen/Ollama). | Closest open analogue to a real-firm workflow. Worth a weekend run. | Worth running |
+| **FactorMAD** (ACM AI in Finance 2025) | Multi-agent debate — two LLMs critique factor proposals before code-gen. | Pattern (adversarial review pre-gate) is the value, not the repo. | Pattern only |
+| **AlphaSAGE** (arXiv 2509.25055) | GFlowNets for structure-aware factor exploration; addresses cold-start sparse-reward + portfolio diversity. | Niche but novel. Revisit if our pool keeps converging on similar formulas. | Watch |
+| **FinGPT** ([AI4Finance/FinGPT](https://github.com/AI4Finance-Foundation/FinGPT)) | LoRA-finetuned LLMs for financial sentiment, news + tweets. | Real, usable, not for factor formulas — for **sentiment feature pipelines**. | Use for NLP |
+| **FinBERT** ([finbert.org](https://finbert.org)) | Pretrained on 60K 10-Ks + 142K 10-Qs + analyst reports + earnings (1994–2019). 88.2% sentiment accuracy. | Drop-in for ticker-day sentiment as cross-sectional factor. | **Adopt for stage 5b** |
+| **FinMem** ([pipiku915/FinMem-LLM-StockTrading](https://github.com/pipiku915/FinMem-LLM-StockTrading), arXiv 2311.13743) | LLM trading agent with 3-layer memory (short/intermediate/long-term) + character profile. | Memory architecture is the keeper. Relevant for any LLM agent retaining regime context across iterations. | Pattern only |
+| **FinRL** ([AI4Finance/FinRL](https://github.com/AI4Finance-Foundation/FinRL)) | RL agents (A2C/DDPG/PPO/TD3/SAC) on Stable-Baselines3 for trading. NeurIPS 2020 origin. | Use RL for **portfolio allocation / execution**, NOT signal generation (fragile rewards, brutal sample efficiency, live perf often disappoints). | Niche use |
+| **FinRobot** ([AI4Finance/FinRobot](https://github.com/AI4Finance-Foundation/FinRobot)) | AI-agent platform with Financial Chain-of-Thought. | Mostly demo-grade — slicker diagrams than production behavior. | Skip |
+| **Alpha-R1** (arXiv 2512.23515) | RL on top of LLM reasoning for alpha screening. | Trend to watch (post-DeepSeek-R1 reasoning-RL wave). | Watch |
+
+### Classical ML — what 2025 actually uses
+
+- **LightGBM** dominates tabular factor prediction (already our default). XGBoost is the safer alternative; CatBoost wins with many cross-sectional categoricals.
+- **Sequence models 2025**: Temporal Fusion Transformer (TFT — multi-horizon, interpretable attention, mature in `pytorch-forecasting`), N-BEATS / N-HiTS (pure-MLP residual stacks; surprisingly strong univariate), and **Mamba / state-space models** — the 2025 story. SST hybrid Mamba-Transformer (arXiv 2404.14757), Graph-Mamba, CMDMamba (Frontiers AI 2025) all benchmarked on CSI 300/800 with reported IC/RankIC improvements. Linear-time vs Transformer's quadratic. Worth experimenting once we have a Transformer baseline working.
+
+### Math foundations — what's worth learning
+
+| Topic | Library | Why care | Source |
+|---|---|---|---|
+| **Hidden Markov Models** for regime detection | `hmmlearn` | Renaissance-grade tool; 50 lines for a working 2-3 state regime gate | Standard |
+| **Kalman filter** for online estimation | `filterpy` (preferred), `pykalman` | Dynamic hedge ratios, online OLS, smoothing noisy factors | Standard |
+| **Cointegration / Johansen test** for stat-arb | `statsmodels.tsa.vector_ar.vecm.coint_johansen` | Pairs / basket trading; multi-asset spreads | Engle-Granger + Johansen 1991 |
+| **Information theory / mutual information** | `sklearn.feature_selection.mutual_info_regression` | Nonlinear feature selection; better than linear corr when relationships are non-monotonic | López de Prado, *MLAM* |
+| **Deflated Sharpe Ratio** | DIY (~30 lines NumPy) | Corrects for selection bias when reporting best-of-N. **Required for any factor mining stack.** | Bailey & López de Prado, SSRN 2460551 |
+| **Combinatorial Purged CV** | DIY or `mlfinlab` | Walk-forward CV leaks across overlapping label horizons; CPCV is the fix | López de Prado, *AFML* ch. 7 |
+| **Causal inference for factors** | `dowhy`, `causalml` | Most factor "discoveries" are spurious correlations; causal graphs reveal which | López de Prado, *Causal Factor Investing* (CFA Institute 2023) |
+
+### Backtest / portfolio frameworks
+
+| Tool | Best for | Verdict |
+|---|---|---|
+| **qlib** (Microsoft) | Cross-sectional ML factor research, Alpha158/360, integrated DL | Already on it. Keep. |
+| **QuantConnect Lean** | Production-grade event-driven backtesting + live trading | Already on it. Keep. |
+| **vectorbt-pro** (paid) / vectorbt | Vectorized backtesting at scale, parameter-grid sweeps in Numba | Fastest for *research* parameter scans. Pro version is paid. |
+| **NautilusTrader** | High-perf event-driven, Rust core | Serious alternative to Lean. Don't migrate without reason. |
+| **RiskFolio-Lib** ([dcajasn/Riskfolio-Lib](https://github.com/dcajasn/Riskfolio-Lib)) | Convex portfolio optimization (24 risk measures, HRP, NCO, CVaR, etc.) on CVXPY | **Adopt** when we add a serious optimizer. Active dev (v7.2.1, Feb 2026). |
+| **skfolio** ([skfolio.org](https://skfolio.org)) | Newer, scikit-learn-style portfolio optimization | Modern alternative if we prefer sklearn idioms. |
+| **PyPortfolioOpt** | Simpler MV/HRP/Black-Litterman | Lighter-weight RiskFolio alternative. |
+| **alphalens-reloaded** | Factor IC analysis, quantile returns | Define the vocabulary (IC, IR, quantile spread). Use for analysis dashboards. |
+| **quantstats** | Modern tear-sheet style perf/risk reports | Use over deprecated pyfolio. |
+
+### Alt-data sources — free vs paid
+
+- **SEC EDGAR** (free) — 10-K/10-Q/8-K filings. Use [`edgartools`](https://github.com/dgunning/edgartools) Python package. **Highest-ROI alt-data for an outsider.**
+- **GDELT** (free) — global news events DB. Useful but noisy.
+- **Reddit (PRAW)** (free) — r/wallstreetbets sentiment was a real factor 2021–24. Supplementary, not primary.
+- **Twitter/X** — post-2023 paywall, $5K/mo for serious volume. Skip unless funded.
+- **Earnings call transcripts** — paid (Refinitiv / Capital IQ / FactSet / SeekingAlpha). Free fallback: company IR pages, occasional Yahoo coverage. Recent research (arXiv 2511.15214, 2604.13260) shows speaker-identity-aware sentiment beats aggregate.
+- **Premium panels** ($2–12M/yr) — credit-card panels (YipitData, Earnest, Facteus), satellite (Orbital Insight, RS Metrics, Spire), app/web (SimilarWeb, Sensor Tower), aggregators (ExtractAlpha, Eagle Alpha, BattleFin, Nasdaq Data Link). Only matters when managing OPM.
+
+For a solo builder: **EDGAR + Reddit + GDELT covers ~80% of the value**.
+
+### Reading list
+
+**Books — the bible:**
+1. **Marcos López de Prado, *Advances in Financial Machine Learning* (2018)** — single most-cited modern ML-in-finance text. Required: chapters 3 (triple-barrier labeling), 4 (sample weights), 7 (CPCV), 14 (backtest statistics), 17 (structural breaks).
+2. **López de Prado, *Machine Learning for Asset Managers* (2020)** — shorter, focused on portfolio construction, denoised covariance, hierarchical clustering (HRP/NCO).
+3. **Stefan Jansen, *Machine Learning for Algorithmic Trading*** + companion repo [stefan-jansen/machine-learning-for-trading](https://github.com/stefan-jansen/machine-learning-for-trading) — 23 chapters of executable notebooks. **Single best free reference repo in the space.**
+4. **Gregory Zuckerman, *The Man Who Solved the Market* (2019)** — Renaissance Technologies origin + philosophy.
+5. **Ernie Chan, *Algorithmic Trading: Winning Strategies and Their Rationale*** — practical algo-trading, accessible math level.
+6. **Robert Carver, *Systematic Trading*** — CTAs, position sizing, systematic frameworks.
+
+**Aggregators / blogs (subscribe):**
+- **[Quantocracy](https://quantocracy.com)** — best daily aggregator. Check 2-3×/week.
+- **[Alpha Architect](https://alphaarchitect.com)** — academic-paper summaries, factor research.
+- **[AQR Insights](https://www.aqr.com/Insights)** — Cliff Asness's library; best public quant fund research.
+- **[Newfound Research](https://blog.thinknewfound.com)** — Corey Hoffstein's writing; portable alpha, return stacking.
+- **Two Sigma, Jane Street tech blogs** — occasional gems on infrastructure + microstructure.
+
+**Podcasts:**
+- **[Flirting With Models](https://www.flirtingwithmodels.com)** (Corey Hoffstein) — best in the space.
+- **Acquired podcast — Renaissance Technologies episode (March 2024)** — canonical accessible deep-dive.
+
+**People worth following on X:**
+- Marcos López de Prado (@lopezdeprado) — primary feed for ML-in-finance methodology
+- Ernie Chan (@echanQT) — practical algo-trading
+- Corey Hoffstein (@choffstein) — Newfound; portable alpha, trend
+- Cliff Asness (@CliffordAsness) — AQR; combative, often correct on factor decay
+- Euan Sinclair (@_eu) — options/vol
+
+**Paper sources:**
+- **SSRN Financial Economics Network** — most quant papers land here pre-journal. Bookmark Bailey, López de Prado, Harvey, Liu, Pedersen, Asness author pages.
+- **arXiv q-fin** — daily new papers; q-fin.PM (portfolio mgmt), q-fin.ST (statistical finance), q-fin.TR (trading).
 
 ---
 
