@@ -36,7 +36,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -176,19 +176,73 @@ def make_slug(traj: dict) -> str:
     return f"{base}-{(traj.get('trajectory_id') or '')[:8]}"
 
 
-def write_factor_json(folder: Path, traj: dict) -> None:
+def _parent_brief(parent_traj: Optional[dict]) -> Optional[dict]:
+    """Denormalize a parent trajectory to its essence — just enough that a
+    downstream consumer (QC's LLM, future mining runs) can understand the
+    lineage without a second lookup.
+    """
+    if not parent_traj:
+        return None
+    p_factors = parent_traj.get("factors") or []
+    return {
+        "trajectory_id": parent_traj.get("trajectory_id"),
+        "phase": parent_traj.get("phase"),
+        "round_idx": parent_traj.get("round_idx"),
+        "hypothesis": (parent_traj.get("hypothesis") or "")[:500],
+        "primary_expression": (p_factors[0].get("expression") if p_factors else None),
+        "primary_name": (p_factors[0].get("name") if p_factors else None),
+        "metrics": parent_traj.get("backtest_metrics"),
+    }
+
+
+def write_factor_json(
+    folder: Path,
+    traj: dict,
+    pool_trajs: Optional[Dict[str, dict]] = None,
+) -> None:
+    """Persist the factor record. Carries hypothesis_details + feedback_details
+    + parent denormalization so a future user (QC LLM, paper trial, etc.)
+    has the full reasoning context, not just the expression.
+    """
     factors = traj.get("factors") or []
+    parent_ids = traj.get("parent_ids") or []
+    parents_brief = []
+    if pool_trajs:
+        for pid in parent_ids:
+            parents_brief.append(_parent_brief(pool_trajs.get(pid)))
     payload = {
         "trajectory_id": traj.get("trajectory_id"),
+        "phase": traj.get("phase"),
+        "round_idx": traj.get("round_idx"),
+        "direction_id": traj.get("direction_id"),
         "factors": factors,
         "hypothesis": traj.get("hypothesis"),
+        "hypothesis_details": traj.get("hypothesis_details") or {},
+        "feedback": traj.get("feedback"),
+        "feedback_details": traj.get("feedback_details") or {},
+        "backtest_metrics": traj.get("backtest_metrics") or {},
+        "parent_ids": parent_ids,
+        "parents": parents_brief,
+        "extra_info": traj.get("extra_info") or {},
+        "created_at": traj.get("created_at"),
     }
     (folder / "factor.json").write_text(
         json.dumps(payload, indent=2, default=str), encoding="utf-8"
     )
 
 
-def write_spec_md(folder: Path, slug: str, traj: dict, m: dict, run_id: str) -> None:
+def write_spec_md(
+    folder: Path,
+    slug: str,
+    traj: dict,
+    m: dict,
+    run_id: str,
+    pool_trajs: Optional[Dict[str, dict]] = None,
+) -> None:
+    """Write a human-readable spec for the factor. Includes hypothesis,
+    factor expression(s), what the LLM learned post-backtest, parent
+    lineage, and links to the canonical machine-readable factor.json.
+    """
     def _cell(v: Optional[float], fmt: str) -> str:
         if v is None:
             return "n/a"
@@ -225,6 +279,92 @@ def write_spec_md(folder: Path, slug: str, traj: dict, m: dict, run_id: str) -> 
         "",
         (traj.get("hypothesis") or "(no hypothesis)").strip(),
     ]
+
+    # Rich LLM rationale (hypothesis_details: reason / observation / justification / knowledge)
+    h_det = traj.get("hypothesis_details") or {}
+    rationale_parts: list[tuple[str, str]] = [
+        ("Why this should work", h_det.get("concise_reason") or h_det.get("reason") or ""),
+        ("Observation behind it", h_det.get("concise_observation") or ""),
+        ("Justification", h_det.get("concise_justification") or ""),
+        ("Domain knowledge applied", h_det.get("concise_knowledge") or ""),
+    ]
+    rationale_parts = [(label, txt) for label, txt in rationale_parts if (txt or "").strip()]
+    if rationale_parts:
+        body.append("")
+        body.append("## LLM rationale")
+        body.append("")
+        for label, txt in rationale_parts:
+            body.append(f"**{label}.** {txt.strip()}")
+            body.append("")
+
+    # Factor expressions (the canonical implementation thumbnail)
+    factors = traj.get("factors") or []
+    if factors:
+        body.append("## Factor expressions")
+        body.append("")
+        for f in factors:
+            name = f.get("name") or "(unnamed)"
+            expr = (f.get("expression") or "").strip()
+            desc = (f.get("description") or "").strip()
+            body.append(f"### `{name}`")
+            body.append("")
+            if expr:
+                body.append("```")
+                body.append(expr)
+                body.append("```")
+                body.append("")
+            if desc:
+                body.append(desc)
+                body.append("")
+
+    # What the LLM learned after backtest
+    f_det = traj.get("feedback_details") or {}
+    learned_parts: list[tuple[str, str]] = [
+        ("Observations", f_det.get("observations") or ""),
+        ("Hypothesis evaluation", f_det.get("hypothesis_evaluation") or ""),
+        ("Decision", f_det.get("decision") or ""),
+        ("New hypothesis going forward", f_det.get("new_hypothesis") or ""),
+    ]
+    learned_parts = [(label, txt) for label, txt in learned_parts if (txt or "").strip()]
+    if learned_parts:
+        body.append("## What we learned (post-backtest)")
+        body.append("")
+        for label, txt in learned_parts:
+            body.append(f"**{label}.** {txt.strip()}")
+            body.append("")
+
+    # Parent denormalization (only for non-original-phase trajectories)
+    parent_ids = traj.get("parent_ids") or []
+    if parent_ids and pool_trajs:
+        body.append("## Lineage")
+        body.append("")
+        body.append(
+            f"This factor was produced by the `{traj.get('phase')}` operator "
+            f"from {len(parent_ids)} parent trajectory"
+            f"{'s' if len(parent_ids) != 1 else ''}:"
+        )
+        body.append("")
+        for pid in parent_ids:
+            p = pool_trajs.get(pid) or {}
+            p_factors = p.get("factors") or []
+            p_first_expr = (p_factors[0].get("expression") if p_factors else "(no expr)")
+            p_metrics = p.get("backtest_metrics") or {}
+            p_ric = p_metrics.get("RankICIR")
+            ric_str = f"{p_ric:.4f}" if isinstance(p_ric, (int, float)) else "n/a"
+            body.append(f"- `{pid[:8]}` (phase={p.get('phase')}, round={p.get('round_idx')}, RankICIR={ric_str})")
+            p_hypo = (p.get("hypothesis") or "").strip()
+            if p_hypo:
+                body.append(f"  > {p_hypo[:200]}{'…' if len(p_hypo) > 200 else ''}")
+            body.append(f"  - parent expr: `{p_first_expr}`")
+        body.append("")
+
+    body.append("---")
+    body.append("")
+    body.append(
+        "_Full machine-readable record (with executable factor code) lives in `factor.json` "
+        "next to this file. Provenance + parent IDs in `provenance.json`._"
+    )
+
     (folder / "spec.md").write_text("\n".join(body) + "\n", encoding="utf-8")
 
 
@@ -316,6 +456,9 @@ def publish_run(run_id: str, findings_root: Path, *, push: bool, force: bool) ->
         print("no findings to publish")
         return 0
 
+    # Build trajectory_id -> traj index for parent denormalization in factor.json
+    pool_trajs: Dict[str, dict] = (pool.get("trajectories") or {})
+
     new_paths: list[str] = []
     new_slugs: list[str] = []
     headline_summary: list[str] = []
@@ -327,8 +470,8 @@ def publish_run(run_id: str, findings_root: Path, *, push: bool, force: bool) ->
             print(f"== {slug}: already published, skipping")
             continue
         folder.mkdir(parents=True, exist_ok=True)
-        write_factor_json(folder, traj)
-        write_spec_md(folder, slug, traj, m, run_id)
+        write_factor_json(folder, traj, pool_trajs=pool_trajs)
+        write_spec_md(folder, slug, traj, m, run_id, pool_trajs=pool_trajs)
         write_results_md(folder, traj)
         write_provenance_json(folder, slug, traj, run_id)
         append_registry_row(findings_root, slug, run_id, m)

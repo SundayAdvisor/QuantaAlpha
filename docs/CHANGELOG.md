@@ -1,5 +1,28 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (later) — Self-describing factor publishing
+
+**Shipped**
+
+- `scripts/publish_findings.py` — `factor.json` now carries the full LLM
+  rationale (`hypothesis_details`), post-backtest analysis (`feedback_details`),
+  denormalized parent records (so consumers see parent's hypothesis +
+  expression + metrics inline), and the executable Python code for each
+  factor. `spec.md` rewritten to expose the LLM rationale + factor code
+  blocks + "What we learned" + lineage. See [phase_4_auto_publish.md](phase_4_auto_publish.md)
+  for the full output schema.
+- `extract_production_model.py` — bundled `factor_expressions.yaml` now
+  includes hypothesis + LLM rationale + parent IDs + per-factor metrics
+  (not just expression). The bundle is now self-describing for downstream
+  use (phase 11 QC integration).
+- Reasoning: a published factor without its hypothesis + LLM rationale +
+  what-we-learned is just a formula. Bundle without the same is a black
+  box for whoever consumes it. Carrying this context across the boundary
+  is what makes the QC LLM able to reason about WHEN a factor works,
+  not just compute it.
+
+
+
 A running record of what's been built, in reverse chronological order, plus
 "what's next" at the bottom. Read this if you want a fast catch-up after
 being away from the project.
