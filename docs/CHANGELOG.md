@@ -1,5 +1,40 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (latest+4) — Math-heavy methods reference doc
+
+User asked if the docs covered math-heavy research. Honest answer was:
+partial — scattered across phase 13/15/16 and a small table in
+research_pipeline.md, but no dedicated treatment.
+
+Wrote [docs/math_heavy_methods.md](math_heavy_methods.md) — a practical
+reference covering 12 method families with intuition (no notation
+overload), library + code sketch, and connection to QA's pipeline
+per technique:
+
+  1. Statistical-significance: Deflated Sharpe, multiple-testing
+     correction (Bonferroni / BH), Combinatorial Purged CV
+  2. Time-series structure: HMM, Kalman, cointegration / Johansen, GARCH
+  3. Information theory: mutual information, transfer entropy
+  4. Causal inference: Pearl do-calculus, Rubin potential outcomes,
+     LdP's Causal Factor Investing
+  5. Stochastic calculus / pricing — minimal section for non-options
+     shop, points at Hull/Wilmott if needed later
+  6. Random matrix theory — Marchenko-Pastur, denoising covariance,
+     HRP for portfolio construction
+  7. Signal extraction — Fourier, wavelets, EMD
+  8. Distributional robustness — CVaR, DRO
+  9. Triple-barrier labeling (LdP)
+  10. Fractional differencing (LdP) — preserves long memory
+  11. Meta-labeling (LdP) — two-stage classifier for trade selection
+  12. Statistical learning theory — overfitting bounds
+
+Plus a section on how LLM-driven mining + math methods complement each
+other (LLM = generative diversity; math = rigor; together = structured
+search with rigor) and a recommended reading order (LdP AFML/MLAM,
+Stefan Jansen's repo, Hamilton, Bishop).
+
+Reference doc, not a build phase. Linked from roadmap.md as a 📚 row.
+
 ## 2026-05-09 (latest+3) — Phases 18-19 specs (sibling-team patterns adopted)
 
 User asked which of the QuantaAlpha team's other publications are worth
