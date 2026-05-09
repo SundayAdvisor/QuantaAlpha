@@ -20,6 +20,7 @@ Legend: ✅ shipped · 🔨 building · 📋 sketch (designed, not built) · �
 | 10 | Walk-forward validation (replace fixed train/valid/test with rolling K-fold or anchored split + holdout) | 📋 sketch | [walk_forward_validation.md](walk_forward_validation.md) |
 | 11 | QC integration — QAAlphaModel consumes QA bundles inside QuantConnect strategies | 📋 sketch | [qc_multi_strategy_architecture.md](qc_multi_strategy_architecture.md), QC's [phase_11_qa_integration.md](../../QuantaQC/docs/phase_11_qa_integration.md) |
 | 12 | Future — more universes (DJIA, sector ETFs, FX), fresh-data inference (predict tomorrow without re-mining), multi-model bundles, retraining cadence | 💭 future | _(no spec yet)_ |
+| ★ | **Full research pipeline** — the "real quant" 10-stage workflow surrounding QA + QC (idea sourcing, hypothesis formalization, data readiness, risk decomposition, decay monitoring, knowledge persistence). Spans this repo + a proposed sibling `QuantaResearch` + QC. | 📋 plan | [research_pipeline.md](research_pipeline.md) |
 
 ## Order of operations (the "what's next" recommendation)
 

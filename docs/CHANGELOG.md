@@ -1,5 +1,23 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (latest) — Full research pipeline plan documented
+
+**Sketched (planned, not built)**
+
+- [docs/research_pipeline.md](research_pipeline.md) — comprehensive plan
+  for the surrounding "real quant" 10-stage workflow: idea sourcing
+  (arXiv + Semantic Scholar + NBER), hypothesis formalization, data
+  readiness check, risk decomposition (Fama-French residual alpha),
+  decay monitoring, knowledge persistence. Maps each stage to its current
+  status (built / sketched / missing), proposes a new sibling project
+  `QuantaResearch` for stages 0/1/2, sketches the architecture diagram
+  end-to-end, and gives a recommended build sequence (1–2 days each for
+  the highest-leverage missing pieces). Linked from `roadmap.md` as
+  the "★ Full research pipeline" entry.
+- Honest scope: this is months-of-work end-to-end. The doc breaks it
+  into ~5 person-days of high-leverage work (stages 0, 1, 2, 5) plus
+  longer-horizon stages 9 + 10 deferred until live deployment exists.
+
 ## 2026-05-09 (later) — Self-describing factor publishing
 
 **Shipped**
