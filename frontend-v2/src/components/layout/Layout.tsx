@@ -1,8 +1,8 @@
 import React from 'react';
-import { Sparkles, Database, BarChart3, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { Sparkles, Database, BarChart3, Settings as SettingsIcon, LogOut, History, Boxes } from 'lucide-react';
 import { useTaskContext } from '@/context/TaskContext';
 
-export type PageId = 'home' | 'library' | 'backtest' | 'settings' | 'mining_dashboard';
+export type PageId = 'home' | 'library' | 'backtest' | 'settings' | 'mining_dashboard' | 'history' | 'bundles';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -36,7 +36,9 @@ export const Layout: React.FC<LayoutProps> = ({
 
   const navItems = [
     { id: 'home' as const, label: 'Factor Mining', icon: Sparkles },
+    { id: 'history' as const, label: 'History', icon: History },
     { id: 'library' as const, label: 'Factor Library', icon: Database },
+    { id: 'bundles' as const, label: 'Models', icon: Boxes },
     { id: 'backtest' as const, label: 'Backtest', icon: BarChart3 },
     { id: 'settings' as const, label: 'Settings', icon: SettingsIcon },
   ];

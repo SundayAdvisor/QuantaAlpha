@@ -280,9 +280,33 @@ You can defer this decision. Phase 5/6 produce the same bundle regardless — th
 
 ---
 
-## Future work (after Phase 5/6 are working)
+## What's NOT built yet (current gaps)
 
-- **Fresh-data factor computation.** Phase 6 currently predicts within the parquet's date range. To predict on truly new dates (e.g. tomorrow), we need a small `compute_factors_fresh.py` that takes `factor_expressions.yaml` + new OHLCV and computes factor values without needing a full mining run. This is what would feed Path B at QC.
+As of 2026-05-09, this is the honest state of the pipeline:
+
+- **No factor-trained bundle yet.** Two bundles exist (`smoke_test_baseline`, `smoke_test_baseline_v2`)
+  but both have `num_factors_in_metadata: 0` — they were trained on the 20 baseline features only.
+  `test_rank_ic ≈ 0.005` (noise level), as expected. To produce a bundle that meaningfully reflects
+  QA's mined alpha, run `extract_production_model.py` against a workspace where a real mining run
+  has produced `combined_factors_df.parquet` files.
+- **No QC-side consumer.** `qc_multi_strategy_architecture.md` describes a `QAAlphaModel` class for
+  QC's Alpha Framework — that class does not exist. Bundles land in `data/results/production_models/`
+  and have nowhere to go. A QC strategy that loads a Phase 5 bundle and calls `model.predict(features)`
+  is on the roadmap (see `repos/QuantaQC/docs/roadmap.md`) but not written.
+- **No "Production Models" tab in the QA frontend.** Bundles aren't listed/inspectable through the UI
+  — you have to look on disk. A FE tab listing bundles + showing each one's metadata + a download button
+  would close the loop visually. Tracked.
+- **No fresh-data inference path.** Phase 6 predicts within the parquet's date range. To predict on
+  *tomorrow's* data, we'd need `compute_factors_fresh.py` that takes `factor_expressions.yaml` + new
+  OHLCV and computes factor values without re-running mining. This is what feeds the in-broker
+  deployment (Path B above).
+- **No bundle versioning / registry.** Bundles are file-system snapshots. Good enough for two users;
+  if multi-user, swap to MLflow or similar later.
+- **No retraining cadence.** Alpha decays. Plan: re-mine + re-extract every N weeks, A/B old-vs-new,
+  retire stale bundles. Not automated.
+
+## Future work (longer-horizon, post-MVP)
+
 - **Multi-model bundles.** Train LGBM + XGBoost + CatBoost on the same factor pool, ensemble their predictions. Cheap diversity gain.
 - **Cross-market transfer (paper §5.4 style).** Train a bundle on one market, apply to another. Requires getting CSI 300 data, but the bundle format already supports it — just point Phase 6 at a CSI bundle while loading SPY data.
 - **Live retraining schedule.** The model degrades over time as markets change (alpha decay). Add a re-mining cadence — e.g. every quarter, run a fresh mining loop, produce a new bundle, A/B against the old one.

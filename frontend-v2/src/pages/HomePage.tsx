@@ -1,5 +1,6 @@
 import React from 'react';
 import { ChatInput } from '@/components/ChatInput';
+import { ObjectiveSuggester } from '@/components/ObjectiveSuggester';
 import { Layout } from '@/components/layout/Layout';
 import type { PageId } from '@/components/layout/Layout';
 import { useTaskContext } from '@/context/TaskContext';
@@ -19,6 +20,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
     startMining,
     stopMining,
   } = useTaskContext();
+
+  const [chatValue, setChatValue] = React.useState('');
 
   return (
     <Layout
@@ -72,6 +75,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
             </div>
           </div>
 
+          {/* AI Direction Suggester */}
+          <div className="w-full max-w-4xl glass rounded-2xl p-6 mb-6">
+            <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
+              <span className="text-lg">✨</span> Need a starting point?
+            </h4>
+            <ObjectiveSuggester onPick={(text) => setChatValue(text)} />
+          </div>
+
           {/* System Info Panel */}
           <div className="w-full max-w-4xl glass rounded-2xl p-6 text-sm space-y-3">
             <h4 className="font-semibold text-foreground mb-3 flex items-center gap-2">
@@ -81,15 +92,48 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
               <div className="flex items-start gap-2">
                 <span className="text-primary mt-0.5">&#9679;</span>
-                <span><strong className="text-foreground">Default universe:</strong> SP500 (US equities) — configurable in <code>configs/backtest.yaml</code></span>
+                <span>
+                  <strong className="text-foreground">Default universe:</strong> SP500 (US equities) — 547 tickers
+                  with continuous data through May 2026. Other universes (NASDAQ, sector ETFs, gold/commodities)
+                  not yet fetched; LLM auto-pick by objective is on the roadmap. Configurable in <code>configs/backtest.yaml</code>.
+                </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-primary mt-0.5">&#9679;</span>
-                <span><strong className="text-foreground">Mining window:</strong> Train 2008–2016, Valid 2017 (preliminary backtest runs on the validation set)</span>
+                <span>
+                  <strong className="text-foreground">Available data:</strong> 1999-12-31 → 2026-05-07 (~6,627
+                  trading days). Default config still uses paper-aligned splits — see below — but you can extend
+                  backtests to today via <code>configs/experiment.yaml</code>.
+                </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-primary mt-0.5">&#9679;</span>
-                <span><strong className="text-foreground">Independent backtest:</strong> Test 2018-01-01 ~ 2020-11-05 (out-of-sample)</span>
+                <span>
+                  <strong className="text-foreground">Mining splits (in-sample):</strong>{' '}
+                  Train <code>2008-01-02 → 2015-12-31</code> (fits LightGBM),
+                  {' '}Valid <code>2016</code> (early-stop), Test <code>2017-01-03 → 2020-11-04</code>{' '}
+                  (the IC / RankICIR / IR you see in <em>History</em>).
+                </span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-warning mt-0.5">&#9679;</span>
+                <span>
+                  <strong className="text-foreground">Subtlety: "test" is in-sample for the mining loop.</strong>{' '}
+                  Mutation/crossover pick parents by their test-segment RankICIR, so mining sees and
+                  optimizes for those scores. A factor's reported test RankICIR is not a true held-out
+                  number — it's still useful for ranking trajectories against each other, but don't read
+                  it as "this factor will work live."
+                </span>
+              </div>
+              <div className="flex items-start gap-2">
+                <span className="text-success mt-0.5">&#9679;</span>
+                <span>
+                  <strong className="text-foreground">Genuine OOS window:</strong>{' '}
+                  <code>2020-11-11 → 2026-05-07</code> (~5.5 yr) — never touched by any mining run, just
+                  freshly fetched. Validate a factor honestly by extracting it to a Phase-5 bundle, then
+                  running <code>predict_with_production_model.py</code> over this range. Covers the 2021
+                  vol regime, 2022 bear, 2023 small-cap rotation, 2024 AI rally.
+                </span>
               </div>
               <div className="flex items-start gap-2">
                 <span className="text-primary mt-0.5">&#9679;</span>
@@ -105,6 +149,8 @@ export const HomePage: React.FC<HomePageProps> = ({ onNavigate }) => {
 
       {/* Bottom Chat Input - Always visible on Home Page for starting new tasks */}
       <ChatInput
+        value={chatValue}
+        onChange={setChatValue}
         onSubmit={startMining}
         onStop={stopMining}
         isRunning={task?.status === 'running'}

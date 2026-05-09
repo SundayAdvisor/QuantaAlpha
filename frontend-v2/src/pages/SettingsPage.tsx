@@ -2,12 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Settings, Save, RotateCcw, Eye, EyeOff, Check, X, AlertCircle, Loader2, Database, Sliders, Box, Cpu, Compass, Shuffle } from 'lucide-react';
+import { Settings, Save, RotateCcw, Eye, EyeOff, Check, AlertCircle, Info, Loader2, Database, Sliders, Box, Cpu, Compass, Shuffle, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { getSystemConfig, updateSystemConfig, healthCheck } from '@/services/api';
 import { REFERENCE_MINING_DIRECTIONS, getDirectionLabel, type MiningDirectionItem } from '@/utils/miningDirections';
 
 interface SystemConfig {
-  // LLM
+  // LLM provider routing — read-only from .env
+  llmProvider: string;            // "claude_code" | "openai" | etc.
+  claudeCodeModel: string;        // active model when provider=claude_code
+  claudeCodeFallback: string;     // "anthropic" | "openai"
+  // LLM (fallback config — only used when provider != claude_code, or as fallback)
   apiKey: string;
   apiUrl: string;
   modelName: string;
@@ -17,7 +21,7 @@ interface SystemConfig {
   // Parameters
   defaultNumDirections: number;
   defaultMaxRounds: number;
-  defaultMarket: 'csi300' | 'csi500' | 'sp500';
+  defaultMarket: 'sp500';         // CSI markets removed — no CN data in this bundle
   // Advanced
   parallelExecution: boolean;
   qualityGateEnabled: boolean;
@@ -29,6 +33,9 @@ interface SystemConfig {
 }
 
 const DEFAULT_CONFIG: SystemConfig = {
+  llmProvider: '',
+  claudeCodeModel: '',
+  claudeCodeFallback: '',
   apiKey: '',
   apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   modelName: 'deepseek-v3',
@@ -91,19 +98,27 @@ export const SettingsPage: React.FC = () => {
             if (Array.isArray(parsed.selectedMiningDirectionIndices)) selectedMiningDirectionIndices = parsed.selectedMiningDirectionIndices;
           } catch { /* use defaults */ }
         }
+        // Carry over locally-cached numeric/checkbox params if present
+        let cached: any = {};
+        if (saved) {
+          try { cached = JSON.parse(saved); } catch { /* ignore */ }
+        }
         setConfig({
+          llmProvider: env.LLM_PROVIDER || '',
+          claudeCodeModel: env.CLAUDE_CODE_MODEL || '',
+          claudeCodeFallback: env.CLAUDE_CODE_FALLBACK || '',
           apiKey: env.OPENAI_API_KEY || '',
           apiUrl: env.OPENAI_BASE_URL || DEFAULT_CONFIG.apiUrl,
           modelName: env.CHAT_MODEL || DEFAULT_CONFIG.modelName,
           qlibDataPath: env.QLIB_DATA_DIR || '',
           resultsDir: env.DATA_RESULTS_DIR || '',
-          defaultNumDirections: 10,
-          defaultMaxRounds: 5,
+          defaultNumDirections: cached.defaultNumDirections ?? DEFAULT_CONFIG.defaultNumDirections,
+          defaultMaxRounds: cached.defaultMaxRounds ?? DEFAULT_CONFIG.defaultMaxRounds,
           defaultMarket: 'sp500',
-          parallelExecution: true,
-          qualityGateEnabled: true,
-          backtestTimeout: 600,
-          defaultLibrarySuffix: '',
+          parallelExecution: cached.parallelExecution ?? DEFAULT_CONFIG.parallelExecution,
+          qualityGateEnabled: cached.qualityGateEnabled ?? DEFAULT_CONFIG.qualityGateEnabled,
+          backtestTimeout: cached.backtestTimeout ?? DEFAULT_CONFIG.backtestTimeout,
+          defaultLibrarySuffix: cached.defaultLibrarySuffix ?? DEFAULT_CONFIG.defaultLibrarySuffix,
           miningDirectionMode,
           selectedMiningDirectionIndices,
         });
@@ -239,9 +254,15 @@ export const SettingsPage: React.FC = () => {
         </div>
       )}
       {isDirty && !isSaved && (
-        <div className="glass rounded-lg p-4 flex items-center gap-3 bg-warning/10 border-warning/50 animate-fade-in-down">
-          <X className="h-5 w-5 text-warning" />
-          <span className="text-warning">Unsaved changes</span>
+        <div className="glass rounded-lg p-4 flex items-center gap-3 bg-primary/10 border-primary/40 animate-fade-in-down">
+          <Info className="h-5 w-5 text-primary shrink-0" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-foreground">You have unsaved changes</div>
+            <div className="text-xs text-muted-foreground">
+              Click <strong>Save</strong> above to apply. Numeric defaults are read by the home-page chat
+              when starting a new mining run.
+            </div>
+          </div>
         </div>
       )}
       {error && (
@@ -264,92 +285,13 @@ export const SettingsPage: React.FC = () => {
         
         {/* API Configuration Tab */}
         {activeTab === 'api' && (
-          <Card className="glass card-hover animate-fade-in-up">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                🤖 LLM model configuration
-                <Badge variant="default">Core</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  API Key <span className="text-destructive">*</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={config.apiKey}
-                    onChange={(e) => updateConfigField('apiKey', e.target.value)}
-                    placeholder="sk-..."
-                    className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="px-3"
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Any OpenAI-compatible API key works (DashScope, DeepSeek, OpenAI, etc.)
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">API Base URL</label>
-                <input
-                  type="text"
-                  value={config.apiUrl}
-                  onChange={(e) => updateConfigField('apiUrl', e.target.value)}
-                  placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
-                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  LLM service endpoint
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">Model name</label>
-                <select
-                  value={config.modelName}
-                  onChange={(e) => updateConfigField('modelName', e.target.value)}
-                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                >
-                  <option value="deepseek-v3">DeepSeek V3</option>
-                  <option value="deepseek-r1">DeepSeek R1</option>
-                  <option value="qwen-max">Qwen Max</option>
-                  <option value="qwen-plus">Qwen Plus</option>
-                  <option value="gpt-4">GPT-4</option>
-                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </select>
-              </div>
-
-              {/* Connection Status */}
-              <div className="pt-4 border-t border-border/50">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`h-3 w-3 rounded-full ${
-                      backendStatus === 'online'
-                        ? 'bg-success animate-pulse'
-                        : backendStatus === 'offline'
-                        ? 'bg-destructive'
-                        : 'bg-warning animate-pulse'
-                    }`}
-                  />
-                  <span className="text-sm">
-                    Backend status:{' '}
-                    {backendStatus === 'online' ? <span className="text-success font-medium">Connected</span> :
-                     backendStatus === 'offline' ? <span className="text-destructive font-medium">Not connected</span> :
-                     'Checking…'}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <ApiTab
+            config={config}
+            updateConfigField={updateConfigField}
+            showApiKey={showApiKey}
+            setShowApiKey={setShowApiKey}
+            backendStatus={backendStatus}
+          />
         )}
 
         {/* Data Path Configuration Tab */}
@@ -433,13 +375,15 @@ export const SettingsPage: React.FC = () => {
                   <input
                     type="number"
                     value={config.defaultNumDirections}
-                    onChange={(e) => updateConfigField('defaultNumDirections', parseInt(e.target.value))}
+                    onChange={(e) => updateConfigField('defaultNumDirections', Math.max(1, parseInt(e.target.value) || 1))}
                     min={1}
-                    max={10}
+                    max={20}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Number of independent directions explored in a single experiment (1–10)
+                    How many independent research directions are explored per mining run (1–20).
+                    Paper default: 10. Higher = more diversity + LLM cost. Saved values apply when you start
+                    a run from the home-page chat (or override per-run there).
                   </p>
                 </div>
 
@@ -448,13 +392,14 @@ export const SettingsPage: React.FC = () => {
                   <input
                     type="number"
                     value={config.defaultMaxRounds}
-                    onChange={(e) => updateConfigField('defaultMaxRounds', parseInt(e.target.value))}
+                    onChange={(e) => updateConfigField('defaultMaxRounds', Math.max(1, parseInt(e.target.value) || 1))}
                     min={1}
                     max={20}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    Maximum iterations of factor self-evolution and optimization (1–20)
+                    Maximum mutation/crossover iterations per direction (1–20). Paper default: 5; pool
+                    typically peaks around iter 11–12 (~350 factors).
                   </p>
                 </div>
 
@@ -465,10 +410,13 @@ export const SettingsPage: React.FC = () => {
                     onChange={(e) => updateConfigField('defaultMarket', e.target.value)}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   >
-                    <option value="csi300">CSI 300 (CSI 300)</option>
-                    <option value="csi500">CSI 500 (CSI 500)</option>
-                    <option value="sp500">S&P 500</option>
+                    <option value="sp500">S&P 500 (US, daily OHLCV)</option>
                   </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Currently only SP500 is bundled (CSI 300 / CSI 500 from the paper require Chinese
+                    A-share data which isn't shipped). Future: NASDAQ, DJIA, sector ETFs, commodities;
+                    auto-pick by objective text.
+                  </p>
                 </div>
 
                 <div>
@@ -557,11 +505,43 @@ export const SettingsPage: React.FC = () => {
                 <Compass className="h-5 w-5" />
                 Research directions (Alpha158(20) reference list)
               </CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                Pick the default reference research directions. When you start a task, one of the selected directions is used (or a random one when random mode is enabled).
-              </p>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* What this is + when it's used */}
+              <div className="rounded-lg border border-border/60 bg-secondary/20 p-4 space-y-2 text-sm">
+                <div className="flex items-center gap-2 font-semibold text-foreground">
+                  <Info className="h-4 w-4 text-primary" />
+                  What this page does (and when it matters)
+                </div>
+                <p className="text-muted-foreground">
+                  This is a <strong>preset pool of objectives</strong> derived from Alpha158's classical
+                  factor families. It's used <strong>only</strong> when you toggle{' '}
+                  <span className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[11px]">
+                    <Compass className="h-3 w-3" />Custom research direction
+                  </span>{' '}
+                  on the home-page chat input. With the toggle <em>off</em> (default), your typed text in
+                  the chat box is used directly — none of these presets are consulted.
+                </p>
+                <p className="text-muted-foreground">
+                  <strong className="text-foreground">Selecting more does NOT improve mining quality.</strong>{' '}
+                  These are alternative <em>starting prompts</em>, not a multi-objective mix. The system
+                  uses one objective per run.
+                </p>
+                <ul className="text-muted-foreground space-y-1 ml-4 list-disc">
+                  <li>
+                    <strong>Use selected</strong> — when you tick the toggle and start a run, the{' '}
+                    <em>first</em> checked direction is used.
+                  </li>
+                  <li>
+                    <strong>Random</strong> — when you tick the toggle and start a run, a random one
+                    from the checked directions is used. Useful for unsupervised exploration sessions.
+                  </li>
+                </ul>
+                <p className="text-muted-foreground text-xs italic">
+                  Recommendation: leave a few you trust ticked, set mode to "Use selected", and ignore
+                  this page unless you want random preset cycling.
+                </p>
+              </div>
               <div>
                 <label className="block text-sm font-medium mb-3">Selection mode</label>
                 <div className="flex flex-wrap gap-4">
@@ -662,5 +642,162 @@ export const SettingsPage: React.FC = () => {
         </CardContent>
       </Card>
     </div>
+  );
+};
+
+// ─── API Tab subcomponent ───────────────────────────────────────────────────
+
+interface ApiTabProps {
+  config: SystemConfig;
+  updateConfigField: (key: keyof SystemConfig, value: any) => void;
+  showApiKey: boolean;
+  setShowApiKey: (v: boolean) => void;
+  backendStatus: 'checking' | 'online' | 'offline';
+}
+
+const ApiTab: React.FC<ApiTabProps> = ({ config, updateConfigField, showApiKey, setShowApiKey, backendStatus }) => {
+  const isClaudeCode = (config.llmProvider || '').toLowerCase() === 'claude_code';
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+
+  return (
+    <Card className="glass card-hover animate-fade-in-up">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          🤖 LLM model configuration
+          <Badge variant="default">Core</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* ── Active provider banner ─────────────────────────────────────── */}
+        {isClaudeCode ? (
+          <div className="rounded-lg border border-primary/40 bg-primary/5 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="font-semibold text-foreground">Active provider:</span>
+              <Badge variant="default" className="bg-primary/20 border-primary/40 text-primary">
+                Claude Code (your local CLI session)
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm pt-1">
+              <div>
+                <span className="text-muted-foreground">Model:</span>{' '}
+                <span className="font-mono text-foreground">{config.claudeCodeModel || '—'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Fallback:</span>{' '}
+                <span className="font-mono text-foreground">{config.claudeCodeFallback || 'none'}</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground pt-1 border-t border-border/40">
+              All LLM calls are routed through your local Claude Code subscription —
+              no per-token API charges. Configured via <code className="font-mono">LLM_PROVIDER=claude_code</code> in
+              the project's <code className="font-mono">.env</code>. To change the active model,
+              edit <code className="font-mono">CLAUDE_CODE_MODEL</code> in <code className="font-mono">.env</code>.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-4">
+            <div className="flex items-center gap-2 text-sm">
+              <AlertCircle className="h-4 w-4 text-amber-300" />
+              <span className="text-amber-200">
+                Active provider: <strong>{config.llmProvider || 'unknown'}</strong> (API-key path).
+                Configure the key + URL + model below.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── API key / OpenAI-compatible config (collapsible when not active) */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setFallbackOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            {fallbackOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {isClaudeCode ? 'API-key fallback configuration' : 'API-key configuration'}
+            <span className="text-[10px] text-muted-foreground/70 normal-case ml-1">
+              {isClaudeCode
+                ? '(used only if Claude Code rate-limits or is unavailable)'
+                : '(active path — required)'}
+            </span>
+          </button>
+
+          {(fallbackOpen || !isClaudeCode) && (
+            <div className="mt-4 space-y-4 pl-4 border-l-2 border-border/40">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  API Key {!isClaudeCode && <span className="text-destructive">*</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={config.apiKey}
+                    onChange={(e) => updateConfigField('apiKey', e.target.value)}
+                    placeholder="sk-..."
+                    className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                  />
+                  <Button variant="outline" onClick={() => setShowApiKey(!showApiKey)} className="px-3">
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Any OpenAI-compatible API key works (DashScope, DeepSeek, OpenAI, etc.)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">API Base URL</label>
+                <input
+                  type="text"
+                  value={config.apiUrl}
+                  onChange={(e) => updateConfigField('apiUrl', e.target.value)}
+                  placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Model name</label>
+                <select
+                  value={config.modelName}
+                  onChange={(e) => updateConfigField('modelName', e.target.value)}
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                >
+                  <option value="deepseek-v3">DeepSeek V3</option>
+                  <option value="deepseek-r1">DeepSeek R1</option>
+                  <option value="qwen-max">Qwen Max</option>
+                  <option value="qwen-plus">Qwen Plus</option>
+                  <option value="gpt-4">GPT-4</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Connection Status */}
+        <div className="pt-4 border-t border-border/50">
+          <div className="flex items-center gap-3">
+            <div
+              className={`h-3 w-3 rounded-full ${
+                backendStatus === 'online'
+                  ? 'bg-success animate-pulse'
+                  : backendStatus === 'offline'
+                  ? 'bg-destructive'
+                  : 'bg-warning animate-pulse'
+              }`}
+            />
+            <span className="text-sm">
+              Backend status:{' '}
+              {backendStatus === 'online' ? <span className="text-success font-medium">Connected</span> :
+               backendStatus === 'offline' ? <span className="text-destructive font-medium">Not connected</span> :
+               'Checking…'}
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

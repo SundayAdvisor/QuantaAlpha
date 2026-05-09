@@ -237,11 +237,21 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
             : (config.userInput && config.userInput.trim()) || getDefaultMiningDirection() || 'Price-volume factor mining';
         const resp = await apiStartMining({
           direction,
+          displayName: config.displayName?.trim() || undefined,
           numDirections: config.numDirections || defaults.defaultNumDirections || 10,
           maxRounds: config.maxRounds || defaults.defaultMaxRounds || 5,
           librarySuffix: config.librarySuffix || defaults.defaultLibrarySuffix || undefined,
           qualityGateEnabled: config.qualityGateEnabled ?? defaults.qualityGateEnabled ?? true,
           parallelEnabled: config.parallelExecution ?? defaults.parallelExecution ?? false,
+          // Universe + date overrides
+          universe: config.universe || undefined,
+          customTickers: (config.customTickers && config.customTickers.length > 0) ? config.customTickers : undefined,
+          trainStart: config.trainStart || undefined,
+          trainEnd: config.trainEnd || undefined,
+          validStart: config.validStart || undefined,
+          validEnd: config.validEnd || undefined,
+          testStart: config.testStart || undefined,
+          testEnd: config.testEnd || undefined,
         });
         if (!resp.success || !resp.data) throw new Error(resp.error || 'Failed');
 

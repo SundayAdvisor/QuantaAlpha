@@ -4,6 +4,8 @@ import { MiningDashboardPage } from '@/pages/MiningDashboardPage';
 import { FactorLibraryPage } from '@/pages/FactorLibraryPage';
 import { BacktestPage } from '@/pages/BacktestPage';
 import { SettingsPage } from '@/pages/SettingsPage';
+import { RunHistoryPage } from '@/pages/RunHistoryPage';
+import { ProductionModelsPage } from '@/pages/ProductionModelsPage';
 import { Layout } from '@/components/layout/Layout';
 import type { PageId } from '@/components/layout/Layout';
 import { ParticleBackground } from '@/components/ParticleBackground';
@@ -38,6 +40,12 @@ const AppContent: React.FC = () => {
       </div>
       <div style={{ display: currentPage === 'mining_dashboard' ? 'block' : 'none' }}>
         <MiningDashboardPage onNavigate={setCurrentPage} />
+      </div>
+      <div style={{ display: currentPage === 'history' ? 'block' : 'none' }}>
+        <RunHistoryPage onNavigate={setCurrentPage} />
+      </div>
+      <div style={{ display: currentPage === 'bundles' ? 'block' : 'none' }}>
+        <ProductionModelsPage onNavigate={setCurrentPage} />
       </div>
       <div style={{ display: currentPage === 'library' ? 'block' : 'none' }}>
         <Layout currentPage={currentPage} onNavigate={setCurrentPage}>
