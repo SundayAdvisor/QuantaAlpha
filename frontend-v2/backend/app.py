@@ -58,7 +58,6 @@ class MiningStartRequest(BaseModel):
     numDirections: Optional[int] = Field(2, description="Parallel exploration directions")
     maxRounds: Optional[int] = Field(3, description="Evolution rounds")
     maxLoops: Optional[int] = Field(2, description="Iterations per direction")
-    factorsPerHypothesis: Optional[int] = Field(3, description="Factors per hypothesis")
     librarySuffix: Optional[str] = Field(None, description="Factor library file suffix")
     qualityGateEnabled: Optional[bool] = Field(None, description="Enable quality gate checks")
     parallelEnabled: Optional[bool] = Field(None, description="Enable parallel execution within evolution phases")
@@ -255,8 +254,11 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
                 run_cfg.setdefault("evolution", {})["max_rounds"] = req.maxRounds
             if req.maxLoops is not None:
                 run_cfg.setdefault("execution", {})["max_loops"] = req.maxLoops
-            if req.factorsPerHypothesis is not None:
-                run_cfg.setdefault("factor", {})["factors_per_hypothesis"] = req.factorsPerHypothesis
+            # NOTE: factors_per_hypothesis was previously surfaced as a knob, but
+            # it's dead config — the actual count is hardcoded in the LLM prompt
+            # at quantaalpha/factors/prompts/prompts.yaml ("Ensure each generation
+            # produces 2-3 factors"). Removed to match QC's cleanup. To make this
+            # configurable, parameterize that prompt template.
 
             # Apply parallel execution override from frontend
             if req.parallelEnabled is not None:
@@ -1416,7 +1418,7 @@ def _write_run_manifest(task: Dict[str, Any], run_id: str) -> None:
                 k: cfg.get(k)
                 for k in (
                     "numDirections", "maxRounds", "maxLoops",
-                    "factorsPerHypothesis", "qualityGateEnabled", "parallelEnabled",
+                    "qualityGateEnabled", "parallelEnabled",
                 )
                 if cfg.get(k) is not None
             },
