@@ -210,9 +210,20 @@ Each item below has a full spec doc. This index just orders them.
 | **3** | **15** | HMM regime detection layer + per-regime strategy mapping table | ~half day | [phase_15_hmm_regime_layer.md](phase_15_hmm_regime_layer.md) |
 | **4** | **14** | QuantaResearch sibling project: arXiv crawler + LLM formalizer + data-readiness + auto-feed | ~1-2 days | [phase_14_quantaresearch.md](phase_14_quantaresearch.md) |
 | **5** | **16** | Signal stacking: 5 combiners benchmarked, contribution attribution, regime-conditional fits | ~2-3 days | [phase_16_signal_stacking.md](phase_16_signal_stacking.md) |
-| 6 | — | FinBERT sentiment on EDGAR 8-Ks (free, real NLP feature stream) | ~1 day | _no spec yet_ |
-| 7 | — | Risk decomposition: regress bundle predictions against Fama-French (residual alpha) | ~1 day | _no spec yet_ |
-| 8 | 9, 10 | Decay monitor + knowledge persistence | defer | _gated by live deployment_ |
+| **6** | **18** | Factor memory service (MemGovern-style): queryable factor experience + 2 LLM tools so the loop stops re-discovering failed factors | ~1-2 days | [phase_18_factor_memory_service.md](phase_18_factor_memory_service.md) |
+| **7** | **19** | Slot-based mutation (EvoControl-style): mutate one slot at a time, diversified init, combinatorial sweep on promotion. Claims 30-80% iteration reduction | ~3-5 days | [phase_19_slot_based_mutation.md](phase_19_slot_based_mutation.md) |
+| 8 | — | FinBERT sentiment on EDGAR 8-Ks (free, real NLP feature stream) | ~1 day | _no spec yet_ |
+| 9 | — | Risk decomposition: regress bundle predictions against Fama-French (residual alpha) | ~1 day | _no spec yet_ |
+| 10 | 9, 10 | Decay monitor + knowledge persistence | defer | _gated by live deployment_ |
+
+**SE-Agent (arXiv 2508.02085, NeurIPS 2025) deliberately not adopted for QA.**
+SE-Agent governs *multi-step agent trajectories* (where each trajectory has many
+intermediate LLM-as-actor states). QA's mining loop is flatter — each trajectory
+is essentially one shot (hypothesis → expression → backtest → feedback). The
+trajectory-pruning ideas would apply at the outer evolution loop, but QA already
+does this via parent selection by RankICIR. **SE-Agent is a better fit for QC's
+multi-step strategy lifecycle** (codegen → repair-on-fail → backtest → review →
+mutate); see QC's roadmap for a future entry there.
 
 **Build order rationale**: 13 first (honesty fix; all subsequent metrics
 depend on it). 17 second (cheap, lets us A/B training windows without

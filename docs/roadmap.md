@@ -25,6 +25,8 @@ Legend: ✅ shipped · 🔨 building · 📋 sketch (designed, not built) · �
 | **15** | **HMM regime detection** — Renaissance-style 3-state hidden Markov model on SPY (calm / normal / turbulent). Exposed as `$regime` qlib feature + strategy-execution gate. Includes per-regime strategy mapping. ~half day. | 📋 next-up | [phase_15_hmm_regime_layer.md](phase_15_hmm_regime_layer.md) |
 | **16** | **Signal stacking** — explicit alpha combiner: 5 combiner functions (equal-weight / IC-weighted / inverse-var / LightGBM / HRP) benchmarked side-by-side, per-factor contribution attribution, regime-conditional fits, online weight refresh. The Renaissance principle as code. ~2-3 days. | 📋 sketch | [phase_16_signal_stacking.md](phase_16_signal_stacking.md) |
 | **17** | **Continuous redevelopment / training cadence** — answer to "Renaissance retrains every 2yr; should we?". 4 training-window presets (paper-aligned / recent-regime / stress-test / walk-forward) in FE Advanced panel + bundle A/B compare harness. ~half day for v1. | 📋 next-up | [phase_17_continuous_redevelopment.md](phase_17_continuous_redevelopment.md) |
+| **18** | **Factor memory service** — adopt MemGovern's (arXiv 2601.06789) pattern: factor pool becomes a queryable HTTP service on :8002 + 2 LLM tools (`/search_factor_experience`, `/get_factor_card`) so the LLM stops re-discovering failed factors every iteration. Curated cards, not raw history. ~1-2 days. | 📋 next-up | [phase_18_factor_memory_service.md](phase_18_factor_memory_service.md) |
+| **19** | **Slot-based mutation** — adopt EvoControl's (arXiv 2601.07348) pattern: define explicit slots (window / feature / transform / normalization / binary_op) in factor expressions, mutate one slot at a time instead of full-expression rewrite. Plus diversified initialization + combinatorial sweep on promotion. Claims 30-80% iteration reduction. ~3-5 days. | 📋 sketch | [phase_19_slot_based_mutation.md](phase_19_slot_based_mutation.md) |
 | ★ | **Full research pipeline** — the "real quant" 10-stage workflow surrounding QA + QC (idea sourcing, hypothesis formalization, data readiness, risk decomposition, decay monitoring, knowledge persistence). Spans this repo + a proposed sibling `QuantaResearch` + QC. **Index document** — phases 13-17 are the buildable pieces. | 📋 plan | [research_pipeline.md](research_pipeline.md) |
 
 ## Order of operations (the "what's next" recommendation)
@@ -54,6 +56,12 @@ Suggested next, in order:
 
   → phase 16  (2–3 days)        signal stacking — explicit alpha combiner.
                                 Builds on 13 + 15.
+
+  → phase 18  (1–2 days)        factor memory service (MemGovern-style).
+                                Stops LLM rediscovering failed factors.
+
+  → phase 19  (3–5 days)        slot-based mutation (EvoControl-style).
+                                30-50% iteration reduction. After 18.
 
   → phase 8   (~1 hr)           backfill linkage for older runs. Cosmetic.
 

@@ -1,5 +1,42 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (latest+3) — Phases 18-19 specs (sibling-team patterns adopted)
+
+User asked which of the QuantaAlpha team's other publications are worth
+adopting. Researched the 33-publication portfolio at quantaalpha.com +
+GitHub org. Three candidates surfaced; specs written for the two worth
+building.
+
+**Phase 18 — Factor memory service (MemGovern-inspired)** — 📋 next-up
+Adopts arXiv 2601.06789 (ACL 2026) pattern: factor pool becomes a
+standalone HTTP service on :8002 (ChromaDB + SQLite), exposes 2 LLM
+tools (`/search_factor_experience`, `/get_factor_card`). LLM calls
+search BEFORE proposing a factor → stops re-discovering near-duplicates
+across iterations. Includes the curated-card schema (hypothesis,
+mechanism, decision, lessons learned, embedding) + curation step that
+distills feedback_details into a clean card. ~1-2 days. Highest ROI of
+the new entries; user already observed the live mining run is proposing
+3 closely-related "vol-conditional reversal" factors in round 0 alone —
+this directly fixes that mode.
+
+**Phase 19 — Slot-based mutation (EvoControl-inspired)** — 📋 sketch
+Adopts arXiv 2601.07348 pattern: define explicit slots in factor
+expressions (window / feature / transform / normalization / binary_op),
+mutate ONE slot at a time instead of regenerating the whole expression.
+Plus diversified-init enforcer (round 0 factors must have distinct
+slot signatures) + combinatorial sweep on promoted factors. Claims
+30-80% iteration reduction. ~3-5 days, queue after 18.
+
+**SE-Agent deliberately NOT adopted for QA.** arXiv 2508.02085 governs
+multi-step agent trajectories (where each trajectory has many
+intermediate LLM-as-actor states). QA's trajectories are flat-ish
+(hypothesis → expression → backtest → feedback as one shot). Better
+fit for QC's multi-step strategy lifecycle; flagged for QC's future
+roadmap entry.
+
+Roadmap + research_pipeline.md updated with new rows + the SE-Agent
+deferral rationale.
+
 ## 2026-05-09 (latest+2) — Phase docs 13-17 created (next-up build queue)
 
 The research_pipeline.md sections "Step 0/1/3" + "Renaissance principles"
