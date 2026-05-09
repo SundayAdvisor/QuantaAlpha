@@ -322,6 +322,7 @@ def run_evolution_loop(
     planning_cfg: dict[str, Any],
     stop_event: threading.Event | None = None,
     quality_gate_cfg: dict[str, Any] | None = None,
+    data_cfg: dict[str, Any] | None = None,
 ):
     """
     Run evolution loop: Original -> Mutation -> Crossover -> Mutation -> ...
@@ -359,7 +360,7 @@ def run_evolution_loop(
         # planner can inject the live ticker / date-range / features list
         # into its prompt — keeps proposed directions runnable on data we
         # actually have on disk.
-        _data_cfg = (run_cfg.get("data") or {}) if isinstance(run_cfg, dict) else {}
+        _data_cfg = data_cfg if isinstance(data_cfg, dict) else {}
         _qlib_root = _data_cfg.get("provider_uri") or _data_cfg.get("qlib_root")
         _universe = _data_cfg.get("universe") or "sp500"
         directions = generate_parallel_directions(
@@ -587,6 +588,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
             logger.info("Evolution mode: Original -> Mutation -> Crossover loop")
             logger.info("="*60)
             
+            data_cfg = (run_cfg.get("data") or {}) if isinstance(run_cfg, dict) else {}
             run_evolution_loop(
                 initial_direction=direction,
                 evolution_cfg=evolution_cfg,
@@ -594,6 +596,7 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                 planning_cfg=planning_cfg,
                 stop_event=stop_event,
                 quality_gate_cfg=quality_gate_cfg,
+                data_cfg=data_cfg,
             )
         
         elif path is None:
