@@ -22,11 +22,34 @@ top-N as committed-ready files into the findings repo.
 **Output layout** (per factor):
 ```
 factors/<slug>/
-  factor.json       # canonical record: name, expression, metrics, lineage
-  spec.md           # human-readable spec: hypothesis, mechanism, params
-  results.md        # backtest table: IC, RankICIR, IR, ARR, MDD by run
-  provenance.json   # source run_id, trajectory_id, hashes
+  factor.json       # canonical machine-readable record:
+                    #   - factors[] with name + expression + description + full Python code
+                    #   - hypothesis (the economic rationale text)
+                    #   - hypothesis_details (LLM's concise reason / observation /
+                    #     justification / domain knowledge)
+                    #   - feedback + feedback_details (post-backtest analysis +
+                    #     decision + new_hypothesis going forward)
+                    #   - parent_ids + parents[] (DENORMALIZED — for each parent
+                    #     id, includes its hypothesis, primary expression, metrics)
+                    #   - backtest_metrics (RankICIR / IR / ARR / MaxDD)
+                    #   - phase / round_idx / direction_id / created_at
+  spec.md           # human-readable: hypothesis, full LLM rationale (Why /
+                    # Observation / Justification / Domain knowledge), each
+                    # factor expression in code blocks with description, what
+                    # we learned post-backtest, lineage (with parent expressions
+                    # inline). Designed so a downstream LLM (QC's QAAlphaModel,
+                    # paper trial) can use the factor without further lookup.
+  results.md        # backtest metrics table
+  provenance.json   # source run_id, trajectory_id, slug, lineage
 ```
+
+**What this means for QC integration (phase 11)**: a QC strategy proposing
+LLM only needs to read `factor.json` for one factor and gets:
+- the qlib expression to compute the factor
+- the actual Python implementation if Lean's expression evaluator falls short
+- the hypothesis + LLM rationale → context for why/when this factor works
+- the parents → lineage so the LLM understands what mutations led here
+- the post-backtest decision → "this passed because of X but watch out for Y"
 
 ### Backend auto-trigger
 

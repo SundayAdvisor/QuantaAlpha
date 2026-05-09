@@ -105,7 +105,12 @@ def build_extraction_config(
 
 def collect_factor_expressions(workspace: Path) -> list[dict]:
     """
-    Pull factor name + expression pairs from the trajectory pool of the run.
+    Pull factor records from the trajectory pool of the run. Includes the
+    economic hypothesis + LLM rationale + parent metrics so the bundle is
+    self-describing — a downstream consumer (QC's QAAlphaModel, paper trial,
+    etc.) doesn't have to cross-reference the findings repo or the original
+    log dir to understand WHAT each factor encodes and WHY it works.
+
     Falls back to empty list if the pool isn't found.
     """
     # Look for the run's trajectory_pool.json
@@ -124,14 +129,39 @@ def collect_factor_expressions(workspace: Path) -> list[dict]:
     pool = json.loads(candidates[0].read_text(encoding="utf-8"))
     out = []
     for traj in (pool.get("trajectories") or {}).values():
-        rank_ic = (traj.get("backtest_metrics") or {}).get("RankIC")
+        bm = traj.get("backtest_metrics") or {}
+        h_det = traj.get("hypothesis_details") or {}
+        f_det = traj.get("feedback_details") or {}
+        traj_hypothesis = (traj.get("hypothesis") or "").strip()
+        # Prefer the LLM's concise distillation if present; fall back to the
+        # raw hypothesis text. These end up inline in factor_expressions.yaml.
+        why = (
+            (h_det.get("concise_reason") or h_det.get("reason") or "").strip()
+            or traj_hypothesis[:300]
+        )
         for f in traj.get("factors", []):
             out.append({
                 "name": f.get("name"),
                 "expression": f.get("expression"),
-                "description": f.get("description", "")[:300],
+                "description": (f.get("description") or "")[:300],
+                # Self-describing context:
+                "hypothesis": traj_hypothesis[:600],
+                "why": why[:500],
+                "domain_knowledge": (h_det.get("concise_knowledge") or "")[:400],
+                "post_backtest_decision": (f_det.get("decision") or "")[:200],
+                "post_backtest_observations": (f_det.get("observations") or "")[:400],
+                # Provenance:
                 "trajectory_id": traj.get("trajectory_id"),
-                "trajectory_rank_ic": rank_ic,
+                "phase": traj.get("phase"),
+                "round_idx": traj.get("round_idx"),
+                "direction_id": traj.get("direction_id"),
+                "parent_ids": traj.get("parent_ids") or [],
+                # Per-factor / per-trajectory metrics (full set, not just RankIC):
+                "trajectory_rank_ic": bm.get("RankIC"),
+                "trajectory_rank_icir": bm.get("RankICIR"),
+                "trajectory_ir": bm.get("information_ratio"),
+                "trajectory_ann_ret": bm.get("annualized_return"),
+                "trajectory_max_dd": bm.get("max_drawdown"),
             })
     return out
 
