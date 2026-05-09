@@ -199,75 +199,26 @@ repos/QuantaResearch/
 
 ---
 
-## Recommended build sequence
+## Recommended build sequence — NEXT-UP work has dedicated phase docs
 
-### Step 0 — Statistical-rigor upgrades to existing pipeline (highest ROI, ~1 day)
+Each item below has a full spec doc. This index just orders them.
 
-Before building anything new, harden the existing factor-mining gate.
-Sourced from López de Prado's *Advances in Financial Machine Learning*
-— the canonical text for ML-in-finance methodology:
+| Order | Phase | What | Effort | Spec |
+|---|---|---|---|---|
+| **1** | **13** | Admission gate upgrades (DSR + CPCV + AST-novelty dedup + triple-barrier) | ~1 day | [phase_13_admission_gate_upgrades.md](phase_13_admission_gate_upgrades.md) |
+| **2** | **17** | Training-window presets (paper-aligned / recent-regime / stress / walk-forward) in FE Advanced + bundle A/B compare harness | ~half day | [phase_17_continuous_redevelopment.md](phase_17_continuous_redevelopment.md) |
+| **3** | **15** | HMM regime detection layer + per-regime strategy mapping table | ~half day | [phase_15_hmm_regime_layer.md](phase_15_hmm_regime_layer.md) |
+| **4** | **14** | QuantaResearch sibling project: arXiv crawler + LLM formalizer + data-readiness + auto-feed | ~1-2 days | [phase_14_quantaresearch.md](phase_14_quantaresearch.md) |
+| **5** | **16** | Signal stacking: 5 combiners benchmarked, contribution attribution, regime-conditional fits | ~2-3 days | [phase_16_signal_stacking.md](phase_16_signal_stacking.md) |
+| 6 | — | FinBERT sentiment on EDGAR 8-Ks (free, real NLP feature stream) | ~1 day | _no spec yet_ |
+| 7 | — | Risk decomposition: regress bundle predictions against Fama-French (residual alpha) | ~1 day | _no spec yet_ |
+| 8 | 9, 10 | Decay monitor + knowledge persistence | defer | _gated by live deployment_ |
 
-| Upgrade | What it fixes | Effort | Citation |
-|---|---|---|---|
-| **Deflated Sharpe Ratio (DSR)** as a gate | When you mine 100s of factors and report the best Sharpe, naive Sharpe drastically overstates the edge. DSR corrects for selection bias + non-normality + number of trials. | ~30 lines NumPy | Bailey & López de Prado, SSRN 2460551 (2014) |
-| **Combinatorial Purged Cross-Validation (CPCV)** | Walk-forward CV leaks information when label horizons overlap. CPCV is the standard fix. | ~half day | López de Prado, *AFML* ch. 7 |
-| **Triple-barrier labeling** | Better than fixed-horizon return labels — defines profit-take + stop-loss + time-out as the label boundaries. Closer to how a strategy actually exits. | ~half day | *AFML* ch. 3 |
-| **AST-similarity dedup** at admission | Prevents factor pool collapse around a single mechanism (we hit this around iteration 11–12 in our runs). Borrowed from AlphaAgent (arXiv 2502.16789). | ~half day | AlphaAgent paper |
-
-Implement in `quantaalpha/factors/admission.py` and the gate config of
-`scripts/publish_findings.py`. **This is the cheapest, highest-impact
-work in the entire pipeline plan.** Do this before adding new stages.
-
-### Step 1 — Minimal QuantaResearch (stages 0 + 1)
-
-`arxiv_crawler.py` + `formalize_hypothesis.py` + integration that POSTs
-to QA's `/api/v1/mining/start`. ~1–2 days.
-
-**Outputs**: every morning, a queue of 5–10 candidate hypotheses ranked
-by novelty + data feasibility. User reviews, approves, mining kicks off.
-
-### Step 2 — Stage 2 (data readiness)
-
-Small validator that checks: do we have the tickers? do we have the
-features? does the test_end exceed our calendar? Auto-rejects infeasible
-hypotheses before they hit QA. ~4 hours.
-
-**Outputs**: `ideas_ready/` only contains hypotheses that QA can actually
-test. No more wasted runs on missing $vwap, etc.
-
-### Step 3 — HMM regime layer (Renaissance-inspired)
-
-Tiny `hmmlearn`-based regime detector. 2–3 states on SPY returns + VIX
-+ realized vol. Output a regime probability used as a strategy-level
-gate (don't trade aggressively in turbulent regime). ~50 lines, ~half
-day. Promote-trial through Lean and compare gated-vs-ungated to verify
-it adds Sharpe. If yes, expose as a feature flag in strategies.
-
-### Step 4 — Stage 5 (risk decomposition)
-
-Once a QA bundle exists, regress its daily predictions against
-Fama-French factors (Mkt-Rf, SMB, HML, MOM, RMW, CMA). The "true alpha"
-is the regression intercept (residual return). Cheap with statsmodels.
-~1 day.
-
-**Outputs**: per-bundle `risk_decomp.json` saying "this factor's
-'alpha' is 80% explained by SMB + MOM" or "this factor's residual
-alpha is 0.3% annualized after FF5 — real edge."
-
-### Step 5 — FinBERT sentiment on EDGAR 8-Ks
-
-Free, real signal, low-effort. `edgartools` (https://github.com/dgunning/edgartools)
-+ FinBERT (https://finbert.org) classifier → ticker-day sentiment score
-→ pre-computed feature in qlib custom-feature dir. ~1 day. Adds an
-NLP-derived feature stream to the factor mining loop.
-
-### Step 6 — Defer stages 9 + 10
-
-They need accumulated runs + live deployment first. Build when:
-- 9: QC Phase 11 (paper trading) actually runs — i.e., we have a live
-  strategy to monitor
-- 10: We have ~50+ QA runs and need an organized memory of "what worked
-  / what didn't" beyond the raw findings repo
+**Build order rationale**: 13 first (honesty fix; all subsequent metrics
+depend on it). 17 second (cheap, lets us A/B training windows without
+code changes per run). 15 + 14 are independent — pick whichever you
+care about more. 16 builds on 13 + 15. 6 + 7 are loose; pick when
+relevant.
 
 ---
 

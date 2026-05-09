@@ -1,5 +1,66 @@
 # QuantaAlpha — Changelog & Status Tracker
 
+## 2026-05-09 (latest+2) — Phase docs 13-17 created (next-up build queue)
+
+The research_pipeline.md sections "Step 0/1/3" + "Renaissance principles"
+were promoted into 5 dedicated phase specs so each is followable instead
+of buried. Each doc has its own scope / file-level deliverables /
+acceptance criteria / cross-references.
+
+**New phase docs (all 📋 sketch — no code yet)**
+
+- [phase_13_admission_gate_upgrades.md](phase_13_admission_gate_upgrades.md) —
+  4-fix bundle for the factor admission gate: Deflated Sharpe Ratio
+  (selection bias correction), Combinatorial Purged CV (label-overlap
+  leakage fix), triple-barrier labeling (better than fixed-horizon
+  labels), AST-similarity dedup (steals AlphaAgent's regularizer to
+  prevent iter-11/12 mode collapse). ~1 day total. **Highest-ROI next
+  step.**
+
+- [phase_14_quantaresearch.md](phase_14_quantaresearch.md) — new sibling
+  project layout: arXiv/Semantic Scholar/NBER/Quantocracy crawlers,
+  LLM hypothesis formalizer with full prompt sketch, data-readiness
+  pre-flight, novelty dedup vs QuantaAlphaFindings, auto-feed to QA's
+  mining/start. ~1-2 days for v1. Replaces "user types objective" with
+  "system proposes from current academic flow."
+
+- [phase_15_hmm_regime_layer.md](phase_15_hmm_regime_layer.md) — Renaissance-
+  flavored HMM regime detection with hmmlearn. Includes a 7×3 strategy-
+  to-regime mapping matrix (which strategy types work in calm/normal/
+  turbulent regimes), code sketch for the detector, qlib feature wiring
+  to expose `$regime` to factor expressions, validation plan, caveats
+  about look-ahead bias and regime-of-regimes. ~half day standalone.
+
+- [phase_16_signal_stacking.md](phase_16_signal_stacking.md) — explicit
+  Renaissance signal-stacking architecture. 4 layers: (A) 5 combiners
+  benchmarked side-by-side (equal-weight / IC-weighted / inverse-var /
+  LightGBM / HRP), (B) per-factor contribution attribution, (C) regime-
+  conditional fits using Phase 15, (D) online weight refresh. Includes
+  the 1+(N-1)c portfolio math showing why N=20 weak signals at c=0.3
+  beats any single signal. ~2-3 days for layers A+B; C blocked on 15;
+  D blocked on live history.
+
+- [phase_17_continuous_redevelopment.md](phase_17_continuous_redevelopment.md) —
+  answers "Renaissance retrains every 2yr; should we?". Currently we
+  train 2008-2015 (ZIRP-era data, deployment-stale). Phase 17 ships 4
+  training-window presets in the FE Advanced panel: paper-aligned,
+  recent-regime (2018-22 / 23 / 24-26 — recommended for deployment),
+  stress-test (covers COVID + bear), walk-forward (slow, gated by 13).
+  Plus a `compare_bundles.py` A/B harness. ~half day.
+
+**Roadmap updated**
+
+[roadmap.md](roadmap.md) gets 5 new rows (phases 13-17) + the "what's
+next" order updated to: 9 → 13 → 17 → 15 → 14 → 16 → … (existing 8/10/11).
+
+**research_pipeline.md updated**
+
+The "Recommended build sequence" section is now a single index table
+pointing at the new phase docs instead of inline write-ups, so it stays
+short and the depth lives in dedicated specs. Sections on Renaissance
+principles, ecosystem references, and reading list remain unchanged in
+research_pipeline.md.
+
 ## 2026-05-09 (latest+1) — Research pipeline doc enriched with 2024-26 quant ecosystem survey
 
 **Updated** [docs/research_pipeline.md](research_pipeline.md):
