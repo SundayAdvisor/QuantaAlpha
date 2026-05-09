@@ -73,6 +73,8 @@ def generate_parallel_directions(
     max_attempts: int = 5,
     use_llm: bool = True,
     allow_fallback: bool = True,
+    qlib_root: Path | str | None = None,
+    universe: str = "sp500",
 ) -> list[str]:
     n = max(1, int(n))
     prompts = _load_prompts(prompt_file)
@@ -80,8 +82,23 @@ def generate_parallel_directions(
     user_tpl = prompts.get("user", "")
     output_format = prompts.get("output_format", "")
 
+    # Universe-aware: inject the live ticker / date-range / feature list so
+    # the LLM only proposes directions on data we actually have.
+    universe_block = "(no qlib data context provided)"
+    if qlib_root is not None:
+        try:
+            from quantaalpha.data.universe import format_universe_for_prompt
+            universe_block = format_universe_for_prompt(qlib_root, universe=universe)
+        except Exception as exc:
+            logger.warning(f"failed to render universe block: {exc}")
+
     system_prompt = sys_tpl.format(initial_direction=initial_direction, n=n)
-    user_prompt = user_tpl.format(initial_direction=initial_direction, n=n)
+    # The new {universe_block} placeholder is optional — older prompt YAMLs
+    # without it still work because we only substitute the keys present.
+    user_format_kwargs = {"initial_direction": initial_direction, "n": n}
+    if "{universe_block}" in user_tpl:
+        user_format_kwargs["universe_block"] = universe_block
+    user_prompt = user_tpl.format(**user_format_kwargs)
     if output_format:
         if "{n}" in output_format:
             output_format = output_format.replace("{n}", str(n))

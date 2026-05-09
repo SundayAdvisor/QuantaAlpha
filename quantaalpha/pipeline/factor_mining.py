@@ -355,6 +355,13 @@ def run_evolution_loop(
     prompt_path = Path(__file__).parent / "prompts" / str(prompt_file)
     
     if planning_enabled and initial_direction:
+        # Pass the qlib root + universe (if available in run config) so the
+        # planner can inject the live ticker / date-range / features list
+        # into its prompt — keeps proposed directions runnable on data we
+        # actually have on disk.
+        _data_cfg = (run_cfg.get("data") or {}) if isinstance(run_cfg, dict) else {}
+        _qlib_root = _data_cfg.get("provider_uri") or _data_cfg.get("qlib_root")
+        _universe = _data_cfg.get("universe") or "sp500"
         directions = generate_parallel_directions(
             initial_direction=initial_direction,
             n=num_directions,
@@ -362,6 +369,8 @@ def run_evolution_loop(
             max_attempts=int(planning_cfg.get("max_attempts", 5)),
             use_llm=bool(planning_cfg.get("use_llm", True)),
             allow_fallback=bool(planning_cfg.get("allow_fallback", True)),
+            qlib_root=_qlib_root,
+            universe=_universe,
         )
     elif planning_enabled:
         directions = [None] * num_directions
@@ -596,6 +605,9 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
             prompt_file = planning_cfg.get("prompt_file") or "planning_prompts.yaml"
             prompt_path = Path(__file__).parent / "prompts" / str(prompt_file)
             if planning_enabled and direction:
+                _data_cfg = (run_cfg.get("data") or {}) if isinstance(run_cfg, dict) else {}
+                _qlib_root = _data_cfg.get("provider_uri") or _data_cfg.get("qlib_root")
+                _universe = _data_cfg.get("universe") or "sp500"
                 directions = generate_parallel_directions(
                     initial_direction=direction,
                     n=n_dirs,
@@ -603,6 +615,8 @@ def main(path=None, step_n=100, direction=None, stop_event=None, config_path=Non
                     max_attempts=max_attempts,
                     use_llm=use_llm,
                     allow_fallback=allow_fallback,
+                    qlib_root=_qlib_root,
+                    universe=_universe,
                 )
             else:
                 directions = [direction] if direction else [None]

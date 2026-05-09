@@ -390,6 +390,55 @@ class TrajectoryPool:
             "successful_trajectories": sum(1 for t in self._trajectories.values() if t.is_successful()),
             "latest_round": self.get_latest_round_idx(),
         }
+
+    def get_admitted_factor_names(
+        self,
+        factor_panel: "pd.DataFrame",
+        corr_threshold: float = 0.7,
+        cap_ratio: float = 0.5,
+    ) -> list[str]:
+        """
+        Apply paper §5.5 admission rule across all trajectories' factors.
+
+        Greedy RankIC-sorted admission with |corr| < corr_threshold filter and
+        cap at cap_ratio * total_mined. Returns the list of factor column names
+        that survive admission.
+
+        Args:
+            factor_panel: wide DataFrame, columns = factor names, MultiIndex
+                rows = (datetime, instrument). Caller supplies this from the
+                concatenated parquet of all-iteration factor values.
+            corr_threshold: pairwise correlation threshold (default 0.7 per paper).
+            cap_ratio: cap pool at cap_ratio * total mined (default 0.5 per paper).
+
+        Returns:
+            List of admitted factor names (subset of factor_panel.columns).
+        """
+        from quantaalpha.pipeline.evolution.admission import filter_factor_panel
+
+        # Aggregate per-factor RankICs from trajectory metadata.
+        # When the same factor name appears in multiple trajectories, keep the
+        # best (max) RankIC observed for it — matches "best-known signal" semantics.
+        rank_ics: dict[str, float] = {}
+        for traj in self._trajectories.values():
+            traj_ric = traj.get_primary_metric()
+            if traj_ric is None:
+                continue
+            for f in traj.factors:
+                name = f.get("name")
+                if not name:
+                    continue
+                # Per-factor RankIC if recorded, else fall back to trajectory RankIC
+                fric = f.get("rank_ic", traj_ric)
+                if fric is None:
+                    continue
+                prev = rank_ics.get(name)
+                if prev is None or fric > prev:
+                    rank_ics[name] = float(fric)
+
+        return filter_factor_panel(
+            factor_panel, rank_ics, corr_threshold=corr_threshold, cap_ratio=cap_ratio
+        )
     
     def clear(self):
         """Clear all trajectories from the pool."""

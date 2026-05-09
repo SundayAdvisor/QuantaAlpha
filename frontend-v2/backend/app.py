@@ -54,6 +54,7 @@ app.add_middleware(
 class MiningStartRequest(BaseModel):
     """Request to start a factor mining experiment."""
     direction: str = Field(..., description="Research direction, e.g. '价量因子挖掘'")
+    displayName: Optional[str] = Field(None, description="Optional human-friendly name shown in History/Models in place of the raw timestamp ID")
     numDirections: Optional[int] = Field(2, description="Parallel exploration directions")
     maxRounds: Optional[int] = Field(3, description="Evolution rounds")
     maxLoops: Optional[int] = Field(2, description="Iterations per direction")
@@ -61,6 +62,15 @@ class MiningStartRequest(BaseModel):
     librarySuffix: Optional[str] = Field(None, description="Factor library file suffix")
     qualityGateEnabled: Optional[bool] = Field(None, description="Enable quality gate checks")
     parallelEnabled: Optional[bool] = Field(None, description="Enable parallel execution within evolution phases")
+    # Universe + date overrides (Phase D — universe-aware mining)
+    universe: Optional[str] = Field(None, description="qlib instruments universe name (sp500 | nasdaq100 | commodities) OR pseudo-name 'custom' when customTickers is supplied")
+    customTickers: Optional[List[str]] = Field(None, description="Optional explicit ticker list. When set, backend writes a per-run instruments file and uses it as the universe. Recommend ≥30 tickers for stable RankIC.")
+    trainStart: Optional[str] = Field(None, description="Train segment start date (YYYY-MM-DD)")
+    trainEnd: Optional[str] = Field(None, description="Train segment end date (YYYY-MM-DD)")
+    validStart: Optional[str] = Field(None, description="Valid segment start date (YYYY-MM-DD)")
+    validEnd: Optional[str] = Field(None, description="Valid segment end date (YYYY-MM-DD)")
+    testStart: Optional[str] = Field(None, description="Test segment start date (YYYY-MM-DD)")
+    testEnd: Optional[str] = Field(None, description="Test segment end date (YYYY-MM-DD)")
 
 
 class BacktestStartRequest(BaseModel):
@@ -213,16 +223,22 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
         os.makedirs(env["WORKSPACE_PATH"], exist_ok=True)
         os.makedirs(env["PICKLE_CACHE_FOLDER_PATH_STR"], exist_ok=True)
 
-        # Qlib symlink
+        # Qlib symlink (best-effort; YAML now uses absolute provider_uri so this is
+        # only kept for backwards-compat with rdagent code paths that hardcode
+        # ~/.qlib/qlib_data/cn_data). Skip silently if it already exists or fails —
+        # on Windows the path may be a junction from `_windows_patches`, in which
+        # case is_symlink() is False but the path can't be re-created without
+        # removing the junction first. Failure here must not kill mining.
         qlib_data = dotenv.get("QLIB_DATA_DIR", "")
         if qlib_data:
-            qlib_symlink_dir = Path.home() / ".qlib" / "qlib_data"
-            qlib_symlink_dir.mkdir(parents=True, exist_ok=True)
-            cn_data_link = qlib_symlink_dir / "cn_data"
-            if not cn_data_link.exists() or os.readlink(str(cn_data_link)) != qlib_data:
-                if cn_data_link.is_symlink():
-                    cn_data_link.unlink()
-                cn_data_link.symlink_to(qlib_data)
+            try:
+                qlib_symlink_dir = Path.home() / ".qlib" / "qlib_data"
+                qlib_symlink_dir.mkdir(parents=True, exist_ok=True)
+                cn_data_link = qlib_symlink_dir / "cn_data"
+                if not cn_data_link.exists():
+                    cn_data_link.symlink_to(qlib_data)
+            except OSError:
+                pass
 
         # Build a temporary config with frontend parameter overrides
         base_config_path = PROJECT_ROOT / "configs" / "experiment.yaml"
@@ -273,6 +289,123 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
             # Fall back to original config if anything fails
             import traceback
             traceback.print_exc()
+
+        # ─── Per-run universe + date overrides ──────────────────────────
+        # If the user supplied universe / train / valid / test segments via the
+        # FE, materialize patched factor_template/conf_*.yaml files into a per-
+        # run override dir. The workspace loader picks this up via
+        # QA_TEMPLATE_OVERRIDE_DIR (see quantaalpha/factors/workspace.py).
+        try:
+            # Custom-ticker path: write a per-run instruments file
+            # data/qlib/us_data/instruments/<custom_name>.txt and rewrite the
+            # universe field to that name.
+            if req.customTickers:
+                clean = [t.strip().upper() for t in req.customTickers if t and t.strip()]
+                clean = [t for t in clean if t.replace("-", "").replace(".", "").isalnum()]
+                if len(clean) >= 2:
+                    qlib_root = Path(dotenv.get("QLIB_DATA_DIR", str(PROJECT_ROOT / "data" / "qlib" / "us_data")))
+                    inst_dir = qlib_root / "instruments"
+                    inst_dir.mkdir(parents=True, exist_ok=True)
+                    suffix = req.librarySuffix or experiment_id
+                    safe_suffix = "".join(c for c in suffix if c.isalnum() or c in "_-")
+                    custom_name = f"custom_{safe_suffix}"
+                    inst_path = inst_dir / f"{custom_name}.txt"
+                    inst_path.write_text(
+                        "\n".join(f"{t}\t1990-01-01\t2099-12-31" for t in clean) + "\n",
+                        encoding="utf-8",
+                    )
+                    req.universe = custom_name
+                    print(f"[mining] wrote custom universe '{custom_name}' with {len(clean)} tickers → {inst_path}")
+            need_override = bool(
+                req.universe
+                or req.trainStart or req.trainEnd
+                or req.validStart or req.validEnd
+                or req.testStart or req.testEnd
+            )
+            if need_override:
+                override_dir = Path(env["WORKSPACE_PATH"]) / "_template_override"
+                override_dir.mkdir(parents=True, exist_ok=True)
+                template_root = PROJECT_ROOT / "quantaalpha" / "factors" / "factor_template"
+                for tpl_name in ("conf_baseline.yaml", "conf_combined_factors.yaml"):
+                    src = template_root / tpl_name
+                    if not src.exists():
+                        continue
+                    raw_text = src.read_text(encoding="utf-8")
+                    cfg = yaml.safe_load(raw_text) or {}
+                    # Patch market (universe). conf_baseline.yaml uses YAML anchors:
+                    #   market: &market sp500
+                    # so we patch the top-level scalar AND use string substitution
+                    # on any anchor that may appear elsewhere.
+                    if req.universe:
+                        cfg["market"] = req.universe
+                        # Also patch instruments + benchmark to a sane choice
+                        if "qlib_init" in cfg and isinstance(cfg.get("qlib_init"), dict):
+                            cfg["qlib_init"]["region"] = cfg["qlib_init"].get("region", "us")
+                        # data_handler instruments
+                        try:
+                            dh = cfg["data_handler_config"]
+                            if isinstance(dh, dict):
+                                dh["instruments"] = req.universe
+                        except Exception:
+                            pass
+                        # Benchmarks per universe
+                        bench_for = {
+                            "sp500":       "^gspc",
+                            "nasdaq100":   "^ndx",
+                            "commodities": "GLD",   # GLD as gold proxy
+                        }.get(req.universe)
+                        if bench_for:
+                            cfg["benchmark"] = bench_for
+                            try:
+                                cfg["port_analysis_config"]["strategy"]["kwargs"]["benchmark"] = bench_for
+                            except Exception:
+                                pass
+                    # Patch segments
+                    try:
+                        segs = cfg["task"]["dataset"]["kwargs"]["segments"]
+                        if req.trainStart and req.trainEnd:
+                            segs["train"] = [req.trainStart, req.trainEnd]
+                        if req.validStart and req.validEnd:
+                            segs["valid"] = [req.validStart, req.validEnd]
+                        if req.testStart and req.testEnd:
+                            segs["test"] = [req.testStart, req.testEnd]
+                        # Top-level start_time / end_time enclose the whole range
+                        try:
+                            all_dates = (
+                                (segs.get("train") or [])
+                                + (segs.get("valid") or [])
+                                + (segs.get("test") or [])
+                            )
+                            all_dates = [d for d in all_dates if d]
+                            if all_dates:
+                                cfg["data_handler_config"]["start_time"] = min(all_dates)
+                                cfg["data_handler_config"]["end_time"] = max(all_dates)
+                        except Exception:
+                            pass
+                        # Also patch the explicit backtest range (used by qlib's
+                        # portfolio analyzer to bound the test backtest)
+                        if req.testStart and req.testEnd:
+                            try:
+                                bk = cfg["port_analysis_config"]["backtest"]
+                                bk["start_time"] = req.testStart
+                                bk["end_time"] = req.testEnd
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                    out = override_dir / tpl_name
+                    out.write_text(
+                        yaml.safe_dump(cfg, allow_unicode=True, default_flow_style=False),
+                        encoding="utf-8",
+                    )
+                env["QA_TEMPLATE_OVERRIDE_DIR"] = str(override_dir)
+                print(f"[mining] template override dir: {override_dir} "
+                      f"(universe={req.universe} train={req.trainStart}->{req.trainEnd} "
+                      f"valid={req.validStart}->{req.validEnd} test={req.testStart}->{req.testEnd})")
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            # Non-fatal — mining continues with default template if patch fails
 
         # Build CLI args
         cmd = [
@@ -429,6 +562,16 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
         # Load final factor count from the library JSON
         # Prefer the library file matching the librarySuffix for this experiment
         _update_mining_metrics(task)
+
+        # Stamp the run's log dir with a manifest so the History page can
+        # show explicit linkages + the user's display_name. Best-effort.
+        run_id = _find_run_id_for_task(task)
+        if run_id:
+            _write_run_manifest(task, run_id)
+
+        # Auto-publish top findings (best-effort; default-on if findings repo exists).
+        if task["status"] == "completed" and run_id:
+            _auto_publish_qa_run(run_id)
 
         await _broadcast(task_id, {
             "type": "result",
@@ -1128,6 +1271,825 @@ async def update_system_config(update: SystemConfigUpdate):
 
     DOTENV_PATH.write_text(content, encoding="utf-8")
     return ApiResponse(success=True, message="配置已更新")
+
+
+# ========================== Run history / analysis / suggester ==========================
+
+
+def _qa_log_root() -> Path:
+    """Resolve the QA `log/` directory (where mining runs persist artifacts)."""
+    env = _load_dotenv_dict()
+    val = env.get("LOG_DIR") or os.environ.get("LOG_DIR")
+    if val:
+        p = Path(val)
+        return p if p.is_absolute() else (PROJECT_ROOT / p)
+    return PROJECT_ROOT / "log"
+
+
+def _qa_qlib_root() -> Optional[Path]:
+    """Resolve the QA qlib data root (provider_uri)."""
+    env = _load_dotenv_dict()
+    val = env.get("QLIB_DATA_DIR") or os.environ.get("QLIB_DATA_DIR")
+    if not val:
+        return None
+    p = Path(val)
+    return p if p.is_absolute() else (PROJECT_ROOT / p)
+
+
+def _find_run_id_for_task(task: Dict[str, Any]) -> Optional[str]:
+    """Pick the QA log dir that was created during this task's lifetime.
+
+    QA writes `log/<timestamp>/` per run; the task itself doesn't track it,
+    so we match by mtime: newest run dir whose mtime ≥ task createdAt.
+    """
+    log_root = _qa_log_root()
+    if not log_root.exists():
+        return None
+    try:
+        created = task.get("createdAt")
+        created_ts = datetime.fromisoformat(created).timestamp() if created else 0.0
+    except Exception:
+        created_ts = 0.0
+    best: Optional[Path] = None
+    for entry in log_root.iterdir():
+        if not entry.is_dir():
+            continue
+        if not (entry / "trajectory_pool.json").exists() and not (entry / "evolution_state.json").exists():
+            continue
+        try:
+            if entry.stat().st_mtime + 1.0 < created_ts:
+                continue
+        except Exception:
+            continue
+        if best is None or entry.stat().st_mtime > best.stat().st_mtime:
+            best = entry
+    return best.name if best else None
+
+
+def _resolve_findings_repo_qa() -> Optional[Path]:
+    """Locate the QA findings repo (sibling dir or env override).
+
+    Tries (in order):
+      1. $QA_FINDINGS_REPO (env / .env)
+      2. <repos>/QuantaAlphaFindings  (CamelCase — current convention)
+      3. <repos>/quantaalpha-findings (lowercase-hyphen — legacy)
+    """
+    env = _load_dotenv_dict()
+    val = env.get("QA_FINDINGS_REPO") or os.environ.get("QA_FINDINGS_REPO")
+    if val:
+        p = Path(val)
+        if p.exists():
+            return p
+    parent = PROJECT_ROOT.parent
+    for candidate_name in ("QuantaAlphaFindings", "quantaalpha-findings"):
+        cand = parent / candidate_name
+        if cand.exists():
+            return cand
+    return None
+
+
+class QASuggestObjectivesRequest(BaseModel):
+    style: Optional[str] = Field("gap-fill", description="gap-fill | adventurous | refinement")
+    n: Optional[int] = Field(4, description="Number of suggestions")
+    focusHint: Optional[str] = Field(None, description="Free-text focus hint")
+    universe: Optional[str] = Field("sp500", description="qlib universe name")
+
+
+def _read_run_manifest(run_dir: Path) -> Optional[Dict[str, Any]]:
+    """Read manifest.json from a log dir if Phase B has written one."""
+    p = run_dir / "manifest.json"
+    if not p.exists():
+        return None
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _write_run_manifest(task: Dict[str, Any], run_id: str) -> None:
+    """Stamp `log/<run_id>/manifest.json` so the FE can show explicit linkages.
+
+    Called at task completion when we know all the values: display_name,
+    objective, library_suffix, workspace_dir, started_at, completed_at.
+
+    Best-effort; never raises on caller's path.
+    """
+    try:
+        log_dir = _qa_log_root() / run_id
+        if not log_dir.exists():
+            return
+
+        cfg = task.get("config") or {}
+        display_name = (cfg.get("displayName") or "").strip() or None
+        objective = (cfg.get("direction") or "").strip() or None
+        library_suffix = cfg.get("librarySuffix")
+        library_name = (
+            f"all_factors_library_{library_suffix}.json"
+            if library_suffix
+            else "all_factors_library.json"
+        )
+
+        # Locate workspace by EXPERIMENT_ID env we set in _run_mining
+        workspace_name: Optional[str] = None
+        try:
+            results_dir = PROJECT_ROOT / "data" / "results"
+            if results_dir.exists() and library_suffix:
+                # Convention: workspace_<experiment_id>; experiment_id == librarySuffix
+                cand = results_dir / f"workspace_{library_suffix}"
+                if cand.exists():
+                    workspace_name = cand.name
+        except Exception:
+            workspace_name = None
+
+        manifest = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "display_name": display_name,
+            "objective": objective,
+            "library_suffix": library_suffix,
+            "library_name": library_name,
+            "workspace_name": workspace_name,
+            "started_at": task.get("createdAt"),
+            "completed_at": task.get("updatedAt") or _now(),
+            "status": task.get("status"),
+            "config": {
+                k: cfg.get(k)
+                for k in (
+                    "numDirections", "maxRounds", "maxLoops",
+                    "factorsPerHypothesis", "qualityGateEnabled", "parallelEnabled",
+                )
+                if cfg.get(k) is not None
+            },
+        }
+        (log_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception:
+        # Manifest writing must not break the task completion path
+        pass
+
+
+def _infer_run_linkages(run_summary: Dict[str, Any]) -> Dict[str, Any]:
+    """Pick the most likely workspace + library for a run.
+
+    Priority:
+      1. manifest.json in the log dir (written by Phase B; not present today).
+      2. Mtime window: workspace whose first parquet was written within
+         ±3 hours of the run's saved_at / created_at.
+    Returns {"linked_workspace": <name|None>, "linked_library": <name|None>}.
+    """
+    log_dir = Path(run_summary.get("log_dir") or "")
+    if log_dir.exists():
+        manifest = _read_run_manifest(log_dir)
+        if manifest:
+            return {
+                "linked_workspace": manifest.get("workspace_name"),
+                "linked_library": manifest.get("library_name"),
+                "linkage_source": "manifest",
+                "display_name": manifest.get("display_name"),
+                "objective": manifest.get("objective"),
+            }
+
+    # Mtime fallback
+    empty = {
+        "linked_workspace": None,
+        "linked_library": None,
+        "linkage_source": None,
+        "display_name": None,
+        "objective": None,
+    }
+    started_iso = run_summary.get("created_at") or run_summary.get("saved_at")
+    if not started_iso:
+        return empty
+    try:
+        started_ts = datetime.fromisoformat(started_iso).timestamp()
+    except Exception:
+        return empty
+
+    results_dir = PROJECT_ROOT / "data" / "results"
+    if not results_dir.exists():
+        return empty
+
+    best_ws: Optional[Path] = None
+    best_delta = float("inf")
+    for entry in results_dir.iterdir():
+        if not entry.is_dir() or not entry.name.startswith("workspace_exp_"):
+            continue
+        parquets = list(entry.glob("*/combined_factors_df.parquet"))
+        if not parquets:
+            continue
+        # Use the earliest parquet write as the workspace's start time
+        ws_start = min(p.stat().st_mtime for p in parquets)
+        delta = abs(ws_start - started_ts)
+        # Allow ±3 hours
+        if delta < 3 * 3600 and delta < best_delta:
+            best_delta = delta
+            best_ws = entry
+
+    if best_ws is None:
+        return empty
+
+    linked_lib = _linked_library_for_workspace(best_ws.name)
+    return {
+        "linked_workspace": best_ws.name,
+        "linked_library": linked_lib["name"] if linked_lib else None,
+        "linkage_source": "mtime",
+        "display_name": None,
+        "objective": None,
+    }
+
+
+@app.get("/api/v1/runs/list", response_model=ApiResponse)
+async def list_qa_runs():
+    """List past QA mining runs from log/. Enriched with workspace/library linkage."""
+    try:
+        from quantaalpha.data.run_history import list_runs
+        runs = list_runs(_qa_log_root())
+        for r in runs:
+            r.update(_infer_run_linkages(r))
+        return ApiResponse(success=True, data={"runs": runs})
+    except Exception as e:
+        return ApiResponse(success=False, error=f"failed to list runs: {e}")
+
+
+@app.get("/api/v1/runs/{run_id}", response_model=ApiResponse)
+async def get_qa_run(run_id: str):
+    """Return one run's full state (summary + pool + cached analysis if any)."""
+    try:
+        from quantaalpha.data.run_history import load_run, load_cached_analysis
+        log_root = _qa_log_root()
+        bundle = load_run(log_root, run_id)
+        cached = load_cached_analysis(log_root, run_id)
+        summary = bundle.get("summary") or {}
+        summary.update(_infer_run_linkages(summary))
+        return ApiResponse(
+            success=True,
+            data={
+                "summary": summary,
+                "pool": bundle.get("pool"),
+                "analysis": cached,
+            },
+        )
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        return ApiResponse(success=False, error=f"failed to load run: {e}")
+
+
+@app.get("/api/v1/runs/{run_id}/lineage", response_model=ApiResponse)
+async def get_qa_lineage(run_id: str):
+    """Return parent→child trajectory edges for visualization."""
+    try:
+        from quantaalpha.data.run_history import load_run
+        bundle = load_run(_qa_log_root(), run_id)
+        pool = bundle.get("pool") or {}
+        trajs = (pool.get("trajectories") or {})
+
+        nodes = []
+        edges = []
+        for tid, t in trajs.items():
+            bm = t.get("backtest_metrics") or {}
+            nodes.append({
+                "id": tid,
+                "phase": t.get("phase"),
+                "round": t.get("round_idx"),
+                "direction_id": t.get("direction_id"),
+                "rank_icir": bm.get("RankICIR"),
+                "ir": bm.get("information_ratio"),
+                "ic": bm.get("IC"),
+                "ann_ret": bm.get("annualized_return"),
+                "max_dd": bm.get("max_drawdown"),
+                "hypothesis": (t.get("hypothesis") or "")[:200],
+            })
+            for pid in (t.get("parent_ids") or []):
+                if pid in trajs:
+                    edges.append({"source": pid, "target": tid})
+
+        return ApiResponse(success=True, data={"nodes": nodes, "edges": edges})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        return ApiResponse(success=False, error=f"failed to build lineage: {e}")
+
+
+@app.post("/api/v1/runs/{run_id}/explain", response_model=ApiResponse)
+async def explain_qa_run(run_id: str):
+    """Run LLM verdict on a completed run; cache to log/<run_id>/analysis.json.
+
+    The LLM call is synchronous and internally spawns its own asyncio loop,
+    so we hand it off to a thread to avoid colliding with FastAPI's event loop.
+    """
+    try:
+        from quantaalpha.data.run_history import load_run
+        from quantaalpha.pipeline.analysis import analyze_run, save_analysis
+        log_root = _qa_log_root()
+        bundle = load_run(log_root, run_id)
+        summary = bundle.get("summary") or {}
+        pool = bundle.get("pool") or {}
+        config = summary.get("config") or {}
+        initial_direction = (config.get("initial_direction") or "")[:300]
+
+        def _run_analysis():
+            analysis = analyze_run(run_id, pool, config, initial_direction=initial_direction)
+            save_analysis(log_root, run_id, analysis)
+            return analysis
+
+        analysis = await asyncio.to_thread(_run_analysis)
+        return ApiResponse(success=True, data={"analysis": analysis.to_dict()})
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        return ApiResponse(success=False, error=f"analysis failed: {e}")
+
+
+@app.post("/api/v1/suggest-objectives", response_model=ApiResponse)
+async def suggest_qa_objectives(req: QASuggestObjectivesRequest):
+    """LLM-driven factor-mining direction suggester.
+
+    Style="auto" auto-picks based on run history; the endpoint echoes
+    `style_resolved` so the FE can show which one was chosen.
+
+    The LLM call is synchronous and internally spawns its own asyncio loop,
+    so we hand it off to a thread to avoid colliding with FastAPI's event loop.
+    """
+    try:
+        from quantaalpha.data.run_history import list_runs
+        from quantaalpha.pipeline.objective_suggester import (
+            suggest_objectives,
+            _auto_pick_style,
+        )
+        qlib_root = _qa_qlib_root()
+        if qlib_root is None:
+            return ApiResponse(success=False, error="QLIB_DATA_DIR not configured")
+        recent_runs = list_runs(_qa_log_root())
+
+        requested = req.style or "auto"
+        style_resolved = _auto_pick_style(recent_runs) if requested == "auto" else requested
+
+        def _run_suggester():
+            return suggest_objectives(
+                qlib_root,
+                universe=req.universe or "sp500",
+                recent_runs=recent_runs,
+                focus_hint=req.focusHint,
+                n_suggestions=req.n or 4,
+                style=style_resolved,
+            )
+
+        suggestions = await asyncio.to_thread(_run_suggester)
+        return ApiResponse(
+            success=True,
+            data={
+                "suggestions": [s.to_dict() for s in suggestions],
+                "style_requested": requested,
+                "style_resolved": style_resolved,
+            },
+        )
+    except Exception as e:
+        return ApiResponse(success=False, error=f"suggest failed: {e}")
+
+
+@app.get("/api/v1/findings-config", response_model=ApiResponse)
+async def get_findings_config():
+    """Surface auto-publish state for the QA findings repo."""
+    repo = _resolve_findings_repo_qa()
+    env = _load_dotenv_dict()
+    auto_disabled = (env.get("QA_FINDINGS_AUTO_PUBLISH") or "").lower() in ("0", "false", "no")
+    return ApiResponse(
+        success=True,
+        data={
+            "repo_path": str(repo) if repo else None,
+            "repo_exists": repo is not None,
+            "auto_publish_enabled": (repo is not None) and (not auto_disabled),
+        },
+    )
+
+
+def _auto_publish_qa_run(run_id: str) -> None:
+    """Fire-and-forget: publish a completed QA run's top factors to findings repo.
+
+    Default-on: runs whenever the findings repo is locatable, unless
+    QA_FINDINGS_AUTO_PUBLISH is explicitly set to 0/false/no.
+    """
+    try:
+        env = _load_dotenv_dict()
+        if (env.get("QA_FINDINGS_AUTO_PUBLISH") or "").lower() in ("0", "false", "no"):
+            return
+        repo = _resolve_findings_repo_qa()
+        if repo is None:
+            return
+        publisher = PROJECT_ROOT / "scripts" / "publish_findings.py"
+        if not publisher.exists():
+            return
+        log_root = _qa_log_root()
+        run_dir = log_root / run_id
+        if not run_dir.exists():
+            return
+        cmd = [
+            sys.executable, str(publisher),
+            "--run", str(run_dir),
+            "--findings-repo", str(repo),
+        ]
+        subprocess.Popen(
+            cmd, cwd=str(PROJECT_ROOT),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+    except Exception:
+        # Non-fatal — auto-publish is best-effort
+        pass
+
+
+# ========================== Universes (Phase D — universe-aware mining) ====
+
+
+def _instruments_dir() -> Path:
+    """Where qlib instruments files live."""
+    qlib_root = _qa_qlib_root()
+    if qlib_root is None:
+        return PROJECT_ROOT / "data" / "qlib" / "us_data" / "instruments"
+    return qlib_root / "instruments"
+
+
+def _universe_summary(name: str, instruments_path: Path) -> Dict[str, Any]:
+    """Return ticker count + recent-data freshness for a universe."""
+    ticker_count = 0
+    try:
+        with open(instruments_path, "r", encoding="utf-8") as fh:
+            ticker_count = sum(1 for line in fh if line.strip())
+    except Exception:
+        ticker_count = 0
+    # Freshness: pick a representative ticker, read its close.day.bin mtime
+    sample_ticker = None
+    try:
+        with open(instruments_path, "r", encoding="utf-8") as fh:
+            first_line = fh.readline().strip()
+            if first_line:
+                sample_ticker = first_line.split()[0].lower()
+    except Exception:
+        pass
+    last_data_iso: Optional[str] = None
+    if sample_ticker:
+        try:
+            qlib_root = _qa_qlib_root() or (PROJECT_ROOT / "data" / "qlib" / "us_data")
+            bin_path = qlib_root / "features" / sample_ticker / "close.day.bin"
+            if bin_path.exists():
+                last_data_iso = datetime.fromtimestamp(bin_path.stat().st_mtime).isoformat()
+        except Exception:
+            pass
+    return {
+        "name": name,
+        "ticker_count": ticker_count,
+        "instruments_path": str(instruments_path),
+        "last_data_mtime": last_data_iso,
+        "sample_ticker": sample_ticker,
+    }
+
+
+@app.get("/api/v1/universes", response_model=ApiResponse)
+async def list_universes_endpoint():
+    """List qlib universes available for mining + their freshness."""
+    inst_dir = _instruments_dir()
+    if not inst_dir.exists():
+        return ApiResponse(success=True, data={"universes": []})
+    out = []
+    for entry in sorted(inst_dir.iterdir()):
+        if entry.is_file() and entry.suffix == ".txt":
+            name = entry.stem
+            # Skip the 'all' universe — too broad, not useful for mining
+            if name == "all":
+                continue
+            try:
+                out.append(_universe_summary(name, entry))
+            except Exception:
+                continue
+    return ApiResponse(success=True, data={"universes": out})
+
+
+class DetectUniverseRequest(BaseModel):
+    text: str = Field(..., description="User's objective text — to map to a universe")
+
+
+_UNIVERSE_DETECT_SYSTEM = """\
+You map a user's factor-mining objective to ONE qlib universe from a fixed list.
+
+Available universes:
+  - sp500       (S&P 500 large-cap US equities, 547 fresh tickers)
+  - nasdaq100   (NASDAQ-100 tech-heavy US equities, 164 fresh tickers)
+  - commodities (Gold/silver/oil/gas/broad-commodity ETFs: GLD, IAU, GDX, GDXJ,
+                 SLV, SIVR, PPLT, USO, UNG, DBC, DBA, GSG, PDBC)
+
+Rules:
+  - If the objective mentions gold, silver, oil, gas, commodities, miners → commodities
+  - If it mentions NASDAQ, tech-heavy, FAANG, mega-cap tech → nasdaq100
+  - If unclear, default to sp500
+  - Output STRICT JSON: {"universe": "sp500|nasdaq100|commodities", "reason": "<one sentence>"}
+"""
+
+
+@app.post("/api/v1/detect-universe", response_model=ApiResponse)
+async def detect_universe(req: DetectUniverseRequest):
+    """LLM-based universe detection from objective text. Best-effort; default sp500.
+
+    Used by FE to suggest a universe as the user types — they can override.
+    """
+    if not (req.text or "").strip():
+        return ApiResponse(success=True, data={"universe": "sp500", "reason": "(empty input — defaulted)"})
+
+    def _do() -> Dict[str, Any]:
+        try:
+            from quantaalpha.llm.client import APIBackend
+            raw = APIBackend().build_messages_and_create_chat_completion(
+                user_prompt=f"Objective:\n{req.text.strip()[:500]}\n\nReturn the JSON now.",
+                system_prompt=_UNIVERSE_DETECT_SYSTEM,
+                json_mode=True,
+            )
+            try:
+                data = json.loads(raw)
+            except Exception:
+                import re
+                m = re.search(r"\{.*\}", raw, re.DOTALL)
+                data = json.loads(m.group(0)) if m else {}
+            picked = (data.get("universe") or "").strip().lower()
+            if picked not in ("sp500", "nasdaq100", "commodities"):
+                picked = "sp500"
+            return {
+                "universe": picked,
+                "reason": str(data.get("reason") or "")[:300],
+            }
+        except Exception as e:
+            return {"universe": "sp500", "reason": f"(detect failed: {e}; defaulted)"}
+
+    result = await asyncio.to_thread(_do)
+    return ApiResponse(success=True, data=result)
+
+
+# ========================== Production Models (Phase 5/6 bundles) ==========================
+
+
+def _production_models_dir() -> Path:
+    """Where extract_production_model.py writes bundles."""
+    return PROJECT_ROOT / "data" / "results" / "production_models"
+
+
+def _workspaces_dir() -> Path:
+    """Where mining runs write per-iteration workspaces (the source for bundles)."""
+    return PROJECT_ROOT / "data" / "results"
+
+
+def _bundle_summary(bundle_dir: Path) -> Dict[str, Any]:
+    """Read metadata.json + factor_expressions.yaml + flag whether model.lgbm exists."""
+    meta_path = bundle_dir / "metadata.json"
+    factors_path = bundle_dir / "factor_expressions.yaml"
+    has_model = (bundle_dir / "model.lgbm").exists()
+    metadata: Dict[str, Any] = {}
+    if meta_path.exists():
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            metadata = {}
+    factor_count = 0
+    if factors_path.exists():
+        try:
+            data = yaml.safe_load(factors_path.read_text(encoding="utf-8")) or {}
+            factor_count = len(data.get("factors") or [])
+        except Exception:
+            factor_count = 0
+    return {
+        "name": bundle_dir.name,
+        "path": str(bundle_dir),
+        "has_model": has_model,
+        "factor_count": factor_count,
+        "saved_at": metadata.get("saved_at"),
+        "market": metadata.get("market"),
+        "benchmark": metadata.get("benchmark"),
+        "model_class": metadata.get("model_class"),
+        "model_kwargs": metadata.get("model_kwargs"),
+        "train_segments": metadata.get("train_segments"),
+        "test_ic": metadata.get("test_ic"),
+        "test_rank_ic": metadata.get("test_rank_ic"),
+        "num_factors_in_metadata": metadata.get("num_factors_in_metadata"),
+    }
+
+
+def _workspace_suffix(ws_name: str) -> Optional[str]:
+    """Extract the suffix from a workspace name.
+
+    `workspace_exp_20260507_171646` → `exp_20260507_171646`
+    Used to match workspaces to their `all_factors_library_<suffix>.json`.
+    """
+    prefix = "workspace_"
+    if ws_name.startswith(prefix) and len(ws_name) > len(prefix):
+        return ws_name[len(prefix):]
+    return None
+
+
+def _linked_library_for_workspace(ws_name: str) -> Optional[Dict[str, Any]]:
+    """Find the all_factors_library_<suffix>.json that matches a workspace name."""
+    suffix = _workspace_suffix(ws_name)
+    if not suffix:
+        return None
+    lib_path = PROJECT_ROOT / "data" / "factorlib" / f"all_factors_library_{suffix}.json"
+    if not lib_path.exists():
+        return None
+    try:
+        mtime = datetime.fromtimestamp(lib_path.stat().st_mtime).isoformat()
+    except Exception:
+        mtime = None
+    factor_count = 0
+    try:
+        with open(lib_path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        factor_count = len(data.get("factors") or {})
+    except Exception:
+        pass
+    return {
+        "name": lib_path.name,
+        "path": str(lib_path),
+        "mtime": mtime,
+        "factor_count": factor_count,
+    }
+
+
+def _workspace_summary(ws_dir: Path) -> Optional[Dict[str, Any]]:
+    """Find combined_factors_df.parquet in a workspace; report what's there.
+
+    Also includes the linked factor library JSON (suffix match) when found.
+    """
+    parquets = sorted(
+        ws_dir.glob("*/combined_factors_df.parquet"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if not parquets:
+        return None
+    latest = parquets[0]
+    try:
+        mtime = datetime.fromtimestamp(latest.stat().st_mtime).isoformat()
+    except Exception:
+        mtime = None
+    return {
+        "name": ws_dir.name,
+        "path": str(ws_dir),
+        "parquet_path": str(latest),
+        "parquet_mtime": mtime,
+        "parquet_count": len(parquets),
+        "linked_library": _linked_library_for_workspace(ws_dir.name),
+    }
+
+
+class BuildBundleRequest(BaseModel):
+    workspace: Optional[str] = Field(None, description="Workspace name under data/results/. Required unless baseline=true.")
+    baseline: Optional[bool] = Field(False, description="Train on baseline 20 features only (smoke test).")
+    outputName: Optional[str] = Field(None, description="Bundle directory name. Defaults to a timestamp.")
+
+
+@app.get("/api/v1/bundles/list", response_model=ApiResponse)
+async def list_bundles():
+    """List all production model bundles on disk."""
+    root = _production_models_dir()
+    if not root.exists():
+        return ApiResponse(success=True, data={"bundles": []})
+    bundles = []
+    for entry in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not entry.is_dir():
+            continue
+        # Skip the build log files we wrote ourselves
+        if entry.name.startswith("_"):
+            continue
+        try:
+            bundles.append(_bundle_summary(entry))
+        except Exception:
+            continue
+    return ApiResponse(success=True, data={"bundles": bundles, "root": str(root)})
+
+
+@app.get("/api/v1/bundles/{name}", response_model=ApiResponse)
+async def get_bundle(name: str):
+    """Return one bundle's full metadata + factor expressions."""
+    root = _production_models_dir()
+    bundle_dir = root / name
+    if not bundle_dir.exists() or not bundle_dir.is_dir():
+        raise HTTPException(status_code=404, detail=f"bundle not found: {name}")
+    summary = _bundle_summary(bundle_dir)
+    factors_path = bundle_dir / "factor_expressions.yaml"
+    factors: List[Dict[str, Any]] = []
+    if factors_path.exists():
+        try:
+            data = yaml.safe_load(factors_path.read_text(encoding="utf-8")) or {}
+            factors = data.get("factors") or []
+        except Exception:
+            factors = []
+    return ApiResponse(success=True, data={"bundle": summary, "factors": factors})
+
+
+@app.get("/api/v1/bundles/workspaces/list", response_model=ApiResponse)
+async def list_buildable_workspaces():
+    """List workspaces with a combined_factors_df.parquet (i.e. ready to extract from)."""
+    root = _workspaces_dir()
+    if not root.exists():
+        return ApiResponse(success=True, data={"workspaces": []})
+    out = []
+    for entry in sorted(root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not entry.is_dir() or not entry.name.startswith("workspace_exp_"):
+            continue
+        s = _workspace_summary(entry)
+        if s is not None:
+            out.append(s)
+    return ApiResponse(success=True, data={"workspaces": out})
+
+
+@app.post("/api/v1/bundles/build", response_model=ApiResponse)
+async def build_bundle(req: BuildBundleRequest):
+    """Kick off extract_production_model.py as a background subprocess.
+
+    Mirrors the CLI's three flags: --workspace, --baseline, --output-name.
+    Returns immediately with a build_task_id; status is polled via the
+    bundles list (the new bundle dir will appear once the script writes it).
+    """
+    script = PROJECT_ROOT / "extract_production_model.py"
+    if not script.exists():
+        return ApiResponse(success=False, error=f"extract_production_model.py not found at {script}")
+
+    cmd = [sys.executable, str(script)]
+    if req.baseline:
+        cmd.append("--baseline")
+    elif req.workspace:
+        ws_path = (PROJECT_ROOT / "data" / "results" / req.workspace) if not Path(req.workspace).is_absolute() else Path(req.workspace)
+        if not ws_path.exists():
+            return ApiResponse(success=False, error=f"workspace not found: {ws_path}")
+        cmd.extend(["--workspace", str(ws_path)])
+    else:
+        return ApiResponse(success=False, error="Either workspace or baseline=true must be provided")
+
+    if req.outputName:
+        # Sanitize: only allow safe characters in bundle directory names
+        safe = "".join(c for c in req.outputName if c.isalnum() or c in ("_", "-"))
+        if not safe:
+            return ApiResponse(success=False, error="outputName must contain alphanumerics / _ / -")
+        cmd.extend(["--output-name", safe])
+        out_name_resolved = safe
+    else:
+        out_name_resolved = f"spy_production_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+    log_path = PROJECT_ROOT / "data" / "results" / "production_models" / f"_build_log_{out_name_resolved}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+
+    task_id = _gen_id()
+    try:
+        log_fh = open(log_path, "w", encoding="utf-8")
+        proc = subprocess.Popen(
+            cmd, cwd=str(PROJECT_ROOT),
+            stdout=log_fh, stderr=subprocess.STDOUT,
+        )
+    except Exception as e:
+        return ApiResponse(success=False, error=f"failed to launch builder: {e}")
+
+    tasks[task_id] = {
+        "type": "build_bundle",
+        "pid": proc.pid,
+        "cmd": cmd,
+        "logPath": str(log_path),
+        "outputName": out_name_resolved,
+        "status": "running",
+        "createdAt": _now(),
+    }
+    return ApiResponse(
+        success=True,
+        data={
+            "buildTaskId": task_id,
+            "outputName": out_name_resolved,
+            "logPath": str(log_path),
+        },
+    )
+
+
+@app.get("/api/v1/bundles/build/{task_id}/log", response_model=ApiResponse)
+async def get_build_log(task_id: str, tail: int = 200):
+    """Return the tail of a build subprocess' log."""
+    task = tasks.get(task_id)
+    if not task or task.get("type") != "build_bundle":
+        raise HTTPException(status_code=404, detail="build task not found")
+    log_path = Path(task.get("logPath", ""))
+    if not log_path.exists():
+        return ApiResponse(success=True, data={"task": task, "log": []})
+    try:
+        lines = log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except Exception as e:
+        return ApiResponse(success=False, error=f"failed to read log: {e}")
+    # Update status if process has exited
+    pid = task.get("pid")
+    if pid and task.get("status") == "running":
+        # Best-effort: if we can detect the process is gone, mark complete
+        try:
+            import psutil  # may not be installed; harmless if not
+            if not psutil.pid_exists(pid):
+                bundle_dir = _production_models_dir() / task["outputName"]
+                task["status"] = "completed" if (bundle_dir / "model.lgbm").exists() else "failed"
+                task["updatedAt"] = _now()
+        except Exception:
+            pass
+    return ApiResponse(success=True, data={"task": task, "log": lines[-tail:]})
 
 
 # ---- WebSocket endpoint ----

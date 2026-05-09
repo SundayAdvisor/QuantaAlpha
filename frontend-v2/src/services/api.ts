@@ -7,8 +7,22 @@
 
 import type {
   ApiResponse,
+  BuildBundleParams,
+  BuildBundleResult,
+  BuildBundleStatus,
+  BuildableWorkspace,
+  BundleFactor,
+  DetectedUniverse,
   Factor,
+  FindingsConfig,
+  LineageEdge,
+  LineageNode,
+  ProductionBundle,
+  RunAnalysis,
+  RunSummary,
+  SuggestedObjective,
   Task,
+  UniverseSummary,
   WsMessage,
 } from '@/types';
 
@@ -35,6 +49,7 @@ async function request<T = any>(
 
 export interface MiningStartParams {
   direction: string;
+  displayName?: string;
   numDirections?: number;
   maxRounds?: number;
   maxLoops?: number;
@@ -42,6 +57,28 @@ export interface MiningStartParams {
   librarySuffix?: string;
   qualityGateEnabled?: boolean;
   parallelEnabled?: boolean;
+  // Universe + date overrides (Phase D)
+  universe?: string;
+  customTickers?: string[];
+  trainStart?: string;
+  trainEnd?: string;
+  validStart?: string;
+  validEnd?: string;
+  testStart?: string;
+  testEnd?: string;
+}
+
+// ─── Universes API ─────────────────────────────────────────────────────────
+
+export async function listUniverses() {
+  return request<{ universes: UniverseSummary[] }>('/api/v1/universes');
+}
+
+export async function detectUniverse(text: string) {
+  return request<DetectedUniverse>('/api/v1/detect-universe', {
+    method: 'POST',
+    body: JSON.stringify({ text }),
+  });
 }
 
 export async function startMining(params: MiningStartParams) {
@@ -171,6 +208,92 @@ export async function updateSystemConfig(update: Record<string, string>) {
     method: 'PUT',
     body: JSON.stringify(update),
   });
+}
+
+// ========================== Run History API ==========================
+
+export async function listRuns() {
+  return request<{ runs: RunSummary[] }>('/api/v1/runs/list');
+}
+
+export async function getRun(runId: string) {
+  return request<{ summary: RunSummary; pool: any; analysis: RunAnalysis | null }>(
+    `/api/v1/runs/${encodeURIComponent(runId)}`
+  );
+}
+
+export async function getRunLineage(runId: string) {
+  return request<{ nodes: LineageNode[]; edges: LineageEdge[] }>(
+    `/api/v1/runs/${encodeURIComponent(runId)}/lineage`
+  );
+}
+
+export async function explainRun(runId: string) {
+  return request<{ analysis: RunAnalysis }>(
+    `/api/v1/runs/${encodeURIComponent(runId)}/explain`,
+    { method: 'POST' }
+  );
+}
+
+// ========================== Objective Suggester API ==========================
+
+export interface SuggestObjectivesParams {
+  style?:
+    | 'auto'
+    | 'gap-fill'
+    | 'adventurous'
+    | 'refinement'
+    | 'diversify'
+    | 'focused'
+    | 'contrarian'
+    | 'simplify'
+    | 'compose';
+  n?: number;
+  focusHint?: string;
+  universe?: string;
+}
+
+export async function suggestObjectives(params: SuggestObjectivesParams = {}) {
+  return request<{ suggestions: SuggestedObjective[] }>('/api/v1/suggest-objectives', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+// ========================== Findings Config API ==========================
+
+export async function getFindingsConfig() {
+  return request<FindingsConfig>('/api/v1/findings-config');
+}
+
+// ========================== Production Model Bundles API ==========================
+
+export async function listBundles() {
+  return request<{ bundles: ProductionBundle[]; root: string }>('/api/v1/bundles/list');
+}
+
+export async function getBundle(name: string) {
+  return request<{ bundle: ProductionBundle; factors: BundleFactor[] }>(
+    `/api/v1/bundles/${encodeURIComponent(name)}`
+  );
+}
+
+export async function listBuildableWorkspaces() {
+  return request<{ workspaces: BuildableWorkspace[] }>('/api/v1/bundles/workspaces/list');
+}
+
+export async function buildBundle(params: BuildBundleParams) {
+  return request<BuildBundleResult>('/api/v1/bundles/build', {
+    method: 'POST',
+    body: JSON.stringify(params),
+  });
+}
+
+export async function getBuildLog(taskId: string, tail: number = 200) {
+  const qs = new URLSearchParams({ tail: String(tail) });
+  return request<BuildBundleStatus>(
+    `/api/v1/bundles/build/${encodeURIComponent(taskId)}/log?${qs.toString()}`
+  );
 }
 
 // ========================== Health Check ==========================

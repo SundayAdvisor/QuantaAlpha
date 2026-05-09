@@ -1,12 +1,23 @@
 """
-Crossover operator for combining multiple parent strategies.
+Crossover operator for combining multiple parent trajectories.
 
-The crossover operator takes multiple parent trajectories and generates a hybrid
-strategy that combines their strengths while avoiding their weaknesses.
+Two modes:
+- `generate_crossover` (legacy): whole-hypothesis fusion via LLM. Loses lineage.
+- `generate_segment_crossover` (paper §4.2.2 eq. 8): decompose each parent into
+  segments (hypothesis, factor expressions, repair actions), score segments by
+  parent RankIC contribution, recombine high-scoring segments from different
+  parents into a child trajectory with explicit provenance.
+
+A "segment" here is one of:
+  - hypothesis: the core market insight
+  - factor_expression_pattern: symbolic construction patterns (e.g. "TS_CORR
+    of return-volume change") that contributed to the parent's reward
+  - repair_action: debugging/correction moves applied during the parent's run
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -15,6 +26,32 @@ import yaml
 from quantaalpha.log import logger
 from quantaalpha.llm.client import APIBackend
 from .trajectory import StrategyTrajectory, RoundPhase
+
+
+SEGMENT_TYPES = ("hypothesis", "factor_expression_pattern", "repair_action")
+
+
+@dataclass
+class CrossoverGuidance:
+    """
+    Structured plan for segment-level crossover with explicit lineage.
+
+    Each entry in `inherited_segments` is a dict:
+        {
+            "type": one of SEGMENT_TYPES,
+            "source_parent_id": trajectory_id,
+            "source_rank_ic": float,
+            "content": the inherited content (text/expression),
+            "rationale": why this segment was chosen
+        }
+
+    `composition_directive` describes how the segments should be combined.
+    """
+    inherited_segments: list[dict] = field(default_factory=list)
+    composition_directive: str = ""
+    lineage_summary: str = ""
+    parent_ids: list[str] = field(default_factory=list)
+    fallback_used: bool = False
 
 
 # Default prompt path
@@ -193,20 +230,20 @@ class CrossoverOperator:
         """Parse JSON response from LLM."""
         import json
         import re
-        
+
         text = response.strip()
-        
+
         # Try to find JSON block
         fence_match = re.search(r"```json\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
         if fence_match:
             text = fence_match.group(1).strip()
-        
+
         # Find JSON object
         start = text.find("{")
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             text = text[start:end + 1]
-        
+
         try:
             data = json.loads(text)
             return {
@@ -217,6 +254,184 @@ class CrossoverOperator:
             }
         except json.JSONDecodeError:
             return {"hybrid_hypothesis": response.strip()}
+
+    def generate_segment_crossover(
+        self, parents: list[StrategyTrajectory]
+    ) -> CrossoverGuidance:
+        """
+        Paper §4.2.2 eq. 8: segment-level crossover with explicit provenance.
+
+        Build a segment menu from each parent (hypothesis, factor expression
+        patterns, repair actions), have the LLM pick the highest-contributing
+        segments from across parents, and emit guidance with traceable lineage.
+        """
+        if len(parents) < 2:
+            logger.warning("Segment crossover requires at least 2 parents")
+            return CrossoverGuidance(
+                fallback_used=True,
+                parent_ids=[p.trajectory_id for p in parents],
+            )
+
+        segment_menu = self._build_segment_menu(parents)
+        parent_ids = [p.trajectory_id for p in parents]
+
+        system_prompt = (
+            "You are a quantitative finance expert performing trajectory-level "
+            "crossover. Below is a segment menu listing the best-performing "
+            "components from each parent trajectory: hypotheses, factor "
+            "expression patterns, and repair actions. Each segment is tagged "
+            "with its source parent and that parent's RankIC.\n\n"
+            "Your job: select segments from DIFFERENT parents whose combination "
+            "is plausibly better than any individual parent. Preserve the exact "
+            "wording of inherited segments (no paraphrasing) so lineage is "
+            "traceable. Output STRICT JSON with keys:\n"
+            "  - inherited_segments: list of {type, source_parent_id, content, rationale}\n"
+            "  - composition_directive: how to combine the chosen segments\n"
+            "  - lineage_summary: one-sentence summary of the inheritance"
+        )
+        user_prompt = (
+            f"Segment menu:\n{segment_menu}\n\n"
+            f"Pick complementary segments from different parents and propose a "
+            f"composition. Inherit at least 2 segments, ideally from at least 2 "
+            f"different parents."
+        )
+
+        try:
+            response = APIBackend().build_messages_and_create_chat_completion(
+                user_prompt=user_prompt,
+                system_prompt=system_prompt,
+                json_mode=True,
+            )
+            parsed = self._parse_segment_response(response)
+            segments = self._validate_inherited_segments(
+                parsed.get("inherited_segments", []), parents
+            )
+            guidance = CrossoverGuidance(
+                inherited_segments=segments,
+                composition_directive=parsed.get("composition_directive", ""),
+                lineage_summary=parsed.get("lineage_summary", ""),
+                parent_ids=parent_ids,
+            )
+            logger.info(
+                f"Segment crossover from {len(parents)} parents: inherited "
+                f"{len(segments)} segments across "
+                f"{len({s['source_parent_id'] for s in segments})} sources"
+            )
+            return guidance
+        except Exception as e:
+            logger.warning(f"Segment crossover LLM call failed ({e}); falling back")
+            fallback = self._fallback_segment_crossover(parents)
+            return CrossoverGuidance(
+                inherited_segments=fallback,
+                composition_directive=(
+                    "Combine the highest-RankIC hypothesis with the second parent's "
+                    "factor expression patterns and any successful repair moves."
+                ),
+                lineage_summary="Heuristic segment inheritance (LLM unavailable)",
+                parent_ids=parent_ids,
+                fallback_used=True,
+            )
+
+    def _build_segment_menu(self, parents: list[StrategyTrajectory]) -> str:
+        """Format each parent's segments for the LLM, tagged with provenance."""
+        lines = []
+        for p in parents:
+            ric = p.get_primary_metric()
+            ric_str = f"{ric:.4f}" if ric is not None else "N/A"
+            lines.append(f"\n=== Parent {p.trajectory_id} (RankIC={ric_str}, "
+                         f"phase={p.phase.value}) ===")
+            # Hypothesis segment
+            if p.hypothesis:
+                lines.append(f"[hypothesis] {p.hypothesis[:400]}")
+            # Factor expression patterns
+            for f in p.factors[:3]:
+                name = f.get("name", "?")
+                expr = (f.get("expression") or "")[:200]
+                if expr:
+                    lines.append(f"[factor_expression_pattern:{name}] {expr}")
+            # Repair actions (from feedback if it mentions corrections)
+            fb = p.feedback or ""
+            if fb and any(k in fb.lower() for k in ("fix", "correct", "repair", "revise")):
+                lines.append(f"[repair_action] {fb[:300]}")
+        return "\n".join(lines)
+
+    def _validate_inherited_segments(
+        self, raw_segments: list, parents: list[StrategyTrajectory]
+    ) -> list[dict]:
+        """Validate LLM's inherited-segment list and attach source RankICs."""
+        parent_lookup = {p.trajectory_id: p for p in parents}
+        clean = []
+        for s in raw_segments:
+            if not isinstance(s, dict):
+                continue
+            stype = s.get("type", "")
+            if stype not in SEGMENT_TYPES:
+                continue
+            src = s.get("source_parent_id", "")
+            parent = parent_lookup.get(src)
+            if parent is None:
+                # LLM may have hallucinated the parent id; pick the highest-RankIC parent as fallback
+                parent = max(parents, key=lambda p: p.get_primary_metric() or 0)
+                src = parent.trajectory_id
+            content = s.get("content", "")
+            if not content:
+                continue
+            clean.append({
+                "type": stype,
+                "source_parent_id": src,
+                "source_rank_ic": parent.get_primary_metric() or 0.0,
+                "content": content,
+                "rationale": s.get("rationale", ""),
+            })
+        return clean
+
+    def _parse_segment_response(self, response: str) -> dict:
+        import json
+        import re
+
+        text = response.strip()
+        fence_match = re.search(r"```json\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        if fence_match:
+            text = fence_match.group(1).strip()
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            text = text[start:end + 1]
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("Segment crossover response not valid JSON")
+            return {}
+
+    def _fallback_segment_crossover(
+        self, parents: list[StrategyTrajectory]
+    ) -> list[dict]:
+        """Heuristic when the LLM is unavailable: take hypothesis from the
+        highest-RankIC parent and one factor expression from the next-best."""
+        ranked = sorted(
+            parents,
+            key=lambda p: p.get_primary_metric() or 0.0,
+            reverse=True,
+        )
+        out = []
+        if ranked and ranked[0].hypothesis:
+            out.append({
+                "type": "hypothesis",
+                "source_parent_id": ranked[0].trajectory_id,
+                "source_rank_ic": ranked[0].get_primary_metric() or 0.0,
+                "content": ranked[0].hypothesis,
+                "rationale": "Highest-RankIC parent's hypothesis",
+            })
+        if len(ranked) > 1 and ranked[1].factors:
+            f = ranked[1].factors[0]
+            out.append({
+                "type": "factor_expression_pattern",
+                "source_parent_id": ranked[1].trajectory_id,
+                "source_rank_ic": ranked[1].get_primary_metric() or 0.0,
+                "content": f"{f.get('name', 'expr')}: {f.get('expression', '')[:200]}",
+                "rationale": "Second-ranked parent's leading factor expression",
+            })
+        return out
     
     def _generate_fallback_crossover(self, parents: list[StrategyTrajectory]) -> dict[str, str]:
         """Generate a fallback crossover when LLM fails."""
@@ -240,20 +455,26 @@ class CrossoverOperator:
         }
     
     def generate_crossover_prompt_suffix(
-        self, 
-        parents: list[StrategyTrajectory]
+        self,
+        parents: list[StrategyTrajectory],
+        segment_mode: bool = True,
     ) -> str:
         """
         Generate a prompt suffix to be appended to the hypothesis generator.
-        
-        This suffix instructs the hypothesis generator to create a hybrid strategy.
-        
+
         Args:
             parents: List of parent trajectories
-            
+            segment_mode: When True (default), use paper §4.2.2 segment-level
+                crossover with explicit lineage. When False, use legacy
+                whole-hypothesis fusion.
+
         Returns:
             Prompt suffix string
         """
+        if segment_mode:
+            guidance = self.generate_segment_crossover(parents)
+            return self._build_segment_suffix(guidance)
+
         crossover_result = self.generate_crossover(parents, use_detailed_prompt=True)
         
         parent_summaries = []
@@ -501,8 +722,71 @@ Please propose your fusion hypothesis based on the above crossover guidance.
             # Sample one
             chosen_idx = random.choices(range(len(candidates_left)), weights=probs, k=1)[0]
             selected.append(candidates_left[chosen_idx])
-            
+
             # Remove chosen from remaining
             remaining = [(c, w) for i, (c, w) in enumerate(remaining) if i != chosen_idx]
-        
+
         return selected
+
+    def _build_segment_suffix(self, guidance: CrossoverGuidance) -> str:
+        """
+        Render CrossoverGuidance as a prompt suffix that instructs the agent to
+        compose a child trajectory from the explicitly inherited segments,
+        preserving lineage.
+        """
+        if not guidance.inherited_segments:
+            return f"""
+
+---
+
+## Crossover Round Guidance — Segment Inheritance (Paper §4.2.2 eq. 8)
+
+Segment selection produced no inheritable segments. Falling back to free
+hypothesis fusion across the parents.
+"""
+
+        segment_lines = []
+        for i, seg in enumerate(guidance.inherited_segments, 1):
+            segment_lines.append(
+                f"{i}. **{seg['type']}** "
+                f"(from parent `{seg['source_parent_id']}`, "
+                f"RankIC={seg['source_rank_ic']:.4f}):\n"
+                f"   ```\n   {seg['content']}\n   ```\n"
+                f"   _rationale_: {seg.get('rationale', '(none)')}"
+            )
+        segments_block = "\n\n".join(segment_lines)
+
+        sources = sorted({s["source_parent_id"] for s in guidance.inherited_segments})
+        provenance = ", ".join(sources)
+
+        suffix = f"""
+
+---
+
+## Crossover Round Guidance — Segment Inheritance (Paper §4.2.2 eq. 8)
+
+This child trajectory inherits validated segments from {len(sources)} parent
+trajectories. PRESERVE inherited content verbatim — lineage must remain
+traceable. Compose downstream steps so they remain consistent with the
+inherited segments.
+
+### Lineage
+{guidance.lineage_summary or '(no summary)'}
+
+Inherited from: {provenance}
+
+### Inherited Segments (DO NOT paraphrase)
+{segments_block}
+
+### Composition Directive
+{guidance.composition_directive or '(combine inherited segments coherently)'}
+
+### Constraints
+1. The hypothesis MUST incorporate the inherited hypothesis segment(s) verbatim.
+2. Factor expressions MUST reuse the inherited factor_expression_pattern(s) as
+   structural building blocks (you may parameterize windows but not change the
+   operator skeleton).
+3. If a repair_action is inherited, apply it during code generation.
+4. Output should clearly trace which content came from which parent.
+"""
+        return suffix

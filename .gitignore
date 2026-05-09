@@ -69,6 +69,7 @@ pip-delete-this-directory.txt
 
 # ---- Data & Results (local experiment outputs) ----
 data/
+!quantaalpha/data/
 mlruns/
 reports/
 backtest_v2_results/
@@ -126,6 +127,9 @@ release-notes.md
 # ---- Translations ----
 *.mo
 *.pot
+
+# ---- Local scratch / debugging utilities (not part of the project) ----
+scratch/
 
 # ---- Sphinx documentation ----
 docs/_build/

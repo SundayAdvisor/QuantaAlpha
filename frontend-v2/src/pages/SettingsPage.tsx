@@ -2,12 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import { Settings, Save, RotateCcw, Eye, EyeOff, Check, X, AlertCircle, Loader2, Database, Sliders, Box, Cpu, Compass, Shuffle } from 'lucide-react';
+import { Settings, Save, RotateCcw, Eye, EyeOff, Check, AlertCircle, Info, Loader2, Database, Sliders, Box, Cpu, Compass, Shuffle, ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
 import { getSystemConfig, updateSystemConfig, healthCheck } from '@/services/api';
 import { REFERENCE_MINING_DIRECTIONS, getDirectionLabel, type MiningDirectionItem } from '@/utils/miningDirections';
 
 interface SystemConfig {
-  // LLM
+  // LLM provider routing — read-only from .env
+  llmProvider: string;            // "claude_code" | "openai" | etc.
+  claudeCodeModel: string;        // active model when provider=claude_code
+  claudeCodeFallback: string;     // "anthropic" | "openai"
+  // LLM (fallback config — only used when provider != claude_code, or as fallback)
   apiKey: string;
   apiUrl: string;
   modelName: string;
@@ -17,7 +21,7 @@ interface SystemConfig {
   // Parameters
   defaultNumDirections: number;
   defaultMaxRounds: number;
-  defaultMarket: 'csi300' | 'csi500' | 'sp500';
+  defaultMarket: 'sp500';         // CSI markets removed — no CN data in this bundle
   // Advanced
   parallelExecution: boolean;
   qualityGateEnabled: boolean;
@@ -29,14 +33,17 @@ interface SystemConfig {
 }
 
 const DEFAULT_CONFIG: SystemConfig = {
+  llmProvider: '',
+  claudeCodeModel: '',
+  claudeCodeFallback: '',
   apiKey: '',
   apiUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   modelName: 'deepseek-v3',
   qlibDataPath: '',
   resultsDir: '',
-  defaultNumDirections: 2,
-  defaultMaxRounds: 3,
-  defaultMarket: 'csi300',
+  defaultNumDirections: 10,    // paper Appendix B: Ninit=10
+  defaultMaxRounds: 5,         // paper Appendix B: 5 main iterations
+  defaultMarket: 'sp500',      // matches conf YAMLs (no CN data in this bundle)
   parallelExecution: true,
   qualityGateEnabled: true,
   backtestTimeout: 600,
@@ -91,19 +98,27 @@ export const SettingsPage: React.FC = () => {
             if (Array.isArray(parsed.selectedMiningDirectionIndices)) selectedMiningDirectionIndices = parsed.selectedMiningDirectionIndices;
           } catch { /* use defaults */ }
         }
+        // Carry over locally-cached numeric/checkbox params if present
+        let cached: any = {};
+        if (saved) {
+          try { cached = JSON.parse(saved); } catch { /* ignore */ }
+        }
         setConfig({
+          llmProvider: env.LLM_PROVIDER || '',
+          claudeCodeModel: env.CLAUDE_CODE_MODEL || '',
+          claudeCodeFallback: env.CLAUDE_CODE_FALLBACK || '',
           apiKey: env.OPENAI_API_KEY || '',
           apiUrl: env.OPENAI_BASE_URL || DEFAULT_CONFIG.apiUrl,
           modelName: env.CHAT_MODEL || DEFAULT_CONFIG.modelName,
           qlibDataPath: env.QLIB_DATA_DIR || '',
           resultsDir: env.DATA_RESULTS_DIR || '',
-          defaultNumDirections: 2,
-          defaultMaxRounds: 3,
-          defaultMarket: 'csi300',
-          parallelExecution: true,
-          qualityGateEnabled: true,
-          backtestTimeout: 600,
-          defaultLibrarySuffix: '',
+          defaultNumDirections: cached.defaultNumDirections ?? DEFAULT_CONFIG.defaultNumDirections,
+          defaultMaxRounds: cached.defaultMaxRounds ?? DEFAULT_CONFIG.defaultMaxRounds,
+          defaultMarket: 'sp500',
+          parallelExecution: cached.parallelExecution ?? DEFAULT_CONFIG.parallelExecution,
+          qualityGateEnabled: cached.qualityGateEnabled ?? DEFAULT_CONFIG.qualityGateEnabled,
+          backtestTimeout: cached.backtestTimeout ?? DEFAULT_CONFIG.backtestTimeout,
+          defaultLibrarySuffix: cached.defaultLibrarySuffix ?? DEFAULT_CONFIG.defaultLibrarySuffix,
           miningDirectionMode,
           selectedMiningDirectionIndices,
         });
@@ -127,7 +142,7 @@ export const SettingsPage: React.FC = () => {
           // use defaults
         }
       }
-      setError('无法从后端加载配置，显示的是本地缓存配置');
+      setError('Could not load configuration from the backend — showing locally cached values.');
     } finally {
       setIsLoading(false);
     }
@@ -168,7 +183,7 @@ export const SettingsPage: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (confirm('确定要重置为默认配置吗？')) {
+    if (confirm('Reset to default configuration?')) {
       setConfig(DEFAULT_CONFIG);
       setIsDirty(true);
     }
@@ -183,7 +198,7 @@ export const SettingsPage: React.FC = () => {
     return (
       <div className="flex items-center justify-center min-h-[40vh]">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <span className="ml-3 text-muted-foreground">加载配置中...</span>
+        <span className="ml-3 text-muted-foreground">Loading configuration…</span>
       </div>
     );
   }
@@ -209,16 +224,16 @@ export const SettingsPage: React.FC = () => {
         <div>
           <h1 className="text-3xl font-bold flex items-center gap-3">
             <Settings className="h-8 w-8 text-primary" />
-            系统配置
+            System settings
           </h1>
           <p className="text-muted-foreground mt-1">
-            管理 API 连接、数据源及实验参数
+            Manage API connection, data sources, and experiment parameters
           </p>
         </div>
         <div className="flex gap-3">
           <Button variant="outline" onClick={handleReset}>
             <RotateCcw className="h-4 w-4 mr-2" />
-            重置
+            Reset
           </Button>
           <Button variant="primary" onClick={handleSave} disabled={!isDirty || isSaving}>
             {isSaving ? (
@@ -226,7 +241,7 @@ export const SettingsPage: React.FC = () => {
             ) : (
               <Save className="h-4 w-4 mr-2" />
             )}
-            保存配置
+            Save
           </Button>
         </div>
       </div>
@@ -235,13 +250,19 @@ export const SettingsPage: React.FC = () => {
       {isSaved && (
         <div className="glass rounded-lg p-4 flex items-center gap-3 bg-success/10 border-success/50 animate-fade-in-down">
           <Check className="h-5 w-5 text-success" />
-          <span className="text-success">配置已保存</span>
+          <span className="text-success">Settings saved</span>
         </div>
       )}
       {isDirty && !isSaved && (
-        <div className="glass rounded-lg p-4 flex items-center gap-3 bg-warning/10 border-warning/50 animate-fade-in-down">
-          <X className="h-5 w-5 text-warning" />
-          <span className="text-warning">有未保存的更改</span>
+        <div className="glass rounded-lg p-4 flex items-center gap-3 bg-primary/10 border-primary/40 animate-fade-in-down">
+          <Info className="h-5 w-5 text-primary shrink-0" />
+          <div className="flex-1">
+            <div className="text-sm font-medium text-foreground">You have unsaved changes</div>
+            <div className="text-xs text-muted-foreground">
+              Click <strong>Save</strong> above to apply. Numeric defaults are read by the home-page chat
+              when starting a new mining run.
+            </div>
+          </div>
         </div>
       )}
       {error && (
@@ -253,10 +274,10 @@ export const SettingsPage: React.FC = () => {
 
       {/* Tabs Navigation */}
       <div className="flex gap-2 p-1 bg-secondary/20 rounded-xl w-fit flex-wrap">
-        <TabButton id="api" label="配置 API" icon={Cpu} />
-        <TabButton id="data" label="数据路径" icon={Database} />
-        <TabButton id="params" label="默认参数" icon={Sliders} />
-        <TabButton id="directions" label="挖掘方向" icon={Compass} />
+        <TabButton id="api" label="API" icon={Cpu} />
+        <TabButton id="data" label="Data Paths" icon={Database} />
+        <TabButton id="params" label="Default Parameters" icon={Sliders} />
+        <TabButton id="directions" label="Research Directions" icon={Compass} />
       </div>
 
       {/* Tab Content */}
@@ -264,92 +285,13 @@ export const SettingsPage: React.FC = () => {
         
         {/* API Configuration Tab */}
         {activeTab === 'api' && (
-          <Card className="glass card-hover animate-fade-in-up">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                🤖 LLM 模型配置
-                <Badge variant="default">核心</Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  API Key <span className="text-destructive">*</span>
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type={showApiKey ? 'text' : 'password'}
-                    value={config.apiKey}
-                    onChange={(e) => updateConfigField('apiKey', e.target.value)}
-                    placeholder="sk-..."
-                    className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                  />
-                  <Button
-                    variant="outline"
-                    onClick={() => setShowApiKey(!showApiKey)}
-                    className="px-3"
-                  >
-                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  支持 OpenAI 兼容格式的 API Key（如 DashScope, DeepSeek 等）
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">API Base URL</label>
-                <input
-                  type="text"
-                  value={config.apiUrl}
-                  onChange={(e) => updateConfigField('apiUrl', e.target.value)}
-                  placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
-                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                />
-                <p className="text-xs text-muted-foreground mt-1">
-                  LLM 服务端点地址
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium mb-2">模型名称</label>
-                <select
-                  value={config.modelName}
-                  onChange={(e) => updateConfigField('modelName', e.target.value)}
-                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                >
-                  <option value="deepseek-v3">DeepSeek V3</option>
-                  <option value="deepseek-r1">DeepSeek R1</option>
-                  <option value="qwen-max">Qwen Max</option>
-                  <option value="qwen-plus">Qwen Plus</option>
-                  <option value="gpt-4">GPT-4</option>
-                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
-                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
-                </select>
-              </div>
-
-              {/* Connection Status */}
-              <div className="pt-4 border-t border-border/50">
-                <div className="flex items-center gap-3">
-                  <div
-                    className={`h-3 w-3 rounded-full ${
-                      backendStatus === 'online'
-                        ? 'bg-success animate-pulse'
-                        : backendStatus === 'offline'
-                        ? 'bg-destructive'
-                        : 'bg-warning animate-pulse'
-                    }`}
-                  />
-                  <span className="text-sm">
-                    后端连接状态：
-                    {backendStatus === 'online' ? <span className="text-success font-medium">已连接</span> : 
-                     backendStatus === 'offline' ? <span className="text-destructive font-medium">未连接</span> : 
-                     '检测中...'}
-                  </span>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          <ApiTab
+            config={config}
+            updateConfigField={updateConfigField}
+            showApiKey={showApiKey}
+            setShowApiKey={setShowApiKey}
+            backendStatus={backendStatus}
+          />
         )}
 
         {/* Data Path Configuration Tab */}
@@ -357,13 +299,13 @@ export const SettingsPage: React.FC = () => {
           <Card className="glass card-hover animate-fade-in-up">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                📊 数据存储路径
+                📊 Data paths
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  Qlib 数据目录 <span className="text-destructive">*</span>
+                  Qlib data directory <span className="text-destructive">*</span>
                 </label>
                 <div className="flex items-center gap-2">
                   <Database className="h-4 w-4 text-muted-foreground" />
@@ -376,13 +318,13 @@ export const SettingsPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  需包含 calendars/, features/, instruments/ 等 Qlib 标准数据子目录
+                  Must contain Qlib's standard subdirectories: calendars/, features/, instruments/
                 </p>
               </div>
 
               <div>
                 <label className="block text-sm font-medium mb-2">
-                  实验结果输出目录
+                  Experiment results output directory
                 </label>
                 <div className="flex items-center gap-2">
                   <Box className="h-4 w-4 text-muted-foreground" />
@@ -395,7 +337,7 @@ export const SettingsPage: React.FC = () => {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground mt-1 ml-6">
-                  用于存放挖掘出的因子、回测报告及日志文件
+                  Where mined factors, backtest reports, and log files are stored
                 </p>
               </div>
 
@@ -403,7 +345,7 @@ export const SettingsPage: React.FC = () => {
                 <div className="bg-secondary/20 rounded-lg p-4 mt-4">
                   <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
                     <Check className="h-4 w-4 text-success" />
-                    已识别的因子库
+                    Detected factor libraries
                   </h4>
                   <div className="flex flex-wrap gap-2">
                     {factorLibraries.map((lib, idx) => (
@@ -423,56 +365,62 @@ export const SettingsPage: React.FC = () => {
           <Card className="glass card-hover animate-fade-in-up">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                ⚙️ 实验默认参数
+                ⚙️ Default experiment parameters
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
-                  <label className="block text-sm font-medium mb-2">并行方向数</label>
+                  <label className="block text-sm font-medium mb-2">Parallel directions</label>
                   <input
                     type="number"
                     value={config.defaultNumDirections}
-                    onChange={(e) => updateConfigField('defaultNumDirections', parseInt(e.target.value))}
-                    min={1}
-                    max={10}
-                    className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
-                  />
-                  <p className="text-xs text-muted-foreground mt-1">
-                    单次实验同时探索的独立方向数量 (1-10)
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">进化轮次</label>
-                  <input
-                    type="number"
-                    value={config.defaultMaxRounds}
-                    onChange={(e) => updateConfigField('defaultMaxRounds', parseInt(e.target.value))}
+                    onChange={(e) => updateConfigField('defaultNumDirections', Math.max(1, parseInt(e.target.value) || 1))}
                     min={1}
                     max={20}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    因子自我进化和优化的最大迭代次数 (1-20)
+                    How many independent research directions are explored per mining run (1–20).
+                    Paper default: 10. Higher = more diversity + LLM cost. Saved values apply when you start
+                    a run from the home-page chat (or override per-run there).
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">默认市场</label>
+                  <label className="block text-sm font-medium mb-2">Evolution rounds</label>
+                  <input
+                    type="number"
+                    value={config.defaultMaxRounds}
+                    onChange={(e) => updateConfigField('defaultMaxRounds', Math.max(1, parseInt(e.target.value) || 1))}
+                    min={1}
+                    max={20}
+                    className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Maximum mutation/crossover iterations per direction (1–20). Paper default: 5; pool
+                    typically peaks around iter 11–12 (~350 factors).
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Default market</label>
                   <select
                     value={config.defaultMarket}
                     onChange={(e) => updateConfigField('defaultMarket', e.target.value)}
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   >
-                    <option value="csi300">CSI 300 (沪深300)</option>
-                    <option value="csi500">CSI 500 (中证500)</option>
-                    <option value="sp500">S&P 500</option>
+                    <option value="sp500">S&P 500 (US, daily OHLCV)</option>
                   </select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Currently only SP500 is bundled (CSI 300 / CSI 500 from the paper require Chinese
+                    A-share data which isn't shipped). Future: NASDAQ, DJIA, sector ETFs, commodities;
+                    auto-pick by objective text.
+                  </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium mb-2">回测超时 (秒)</label>
+                  <label className="block text-sm font-medium mb-2">Backtest timeout (s)</label>
                   <input
                     type="number"
                     value={config.backtestTimeout}
@@ -482,12 +430,12 @@ export const SettingsPage: React.FC = () => {
                     className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                   />
                   <p className="text-xs text-muted-foreground mt-1">
-                    单次回测最大执行时间 (秒)
+                    Maximum runtime per backtest (s)
                   </p>
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium mb-2">默认因子库名称后缀</label>
+                  <label className="block text-sm font-medium mb-2">Default factor library suffix</label>
                   <div className="flex items-center gap-2">
                     <span className="text-sm text-muted-foreground font-mono">all_factors_library_</span>
                     <input
@@ -497,20 +445,20 @@ export const SettingsPage: React.FC = () => {
                         const val = e.target.value.replace(/[^a-zA-Z0-9_\-]/g, '');
                         updateConfigField('defaultLibrarySuffix', val);
                       }}
-                      placeholder="例如 momentum_v1 (留空则无后缀)"
+                      placeholder="e.g. momentum_v1 (leave blank for no suffix)"
                       className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm font-mono focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
                     />
                     <span className="text-sm text-muted-foreground font-mono">.json</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                    生成的因子将保存到此文件。支持字母、数字、下划线。
+                    Generated factors will be saved to this file. Letters, digits, and underscores only.
                   </p>
                 </div>
               </div>
 
               <div className="pt-4 border-t border-border/50 space-y-4">
-                <h4 className="text-sm font-medium">高级控制</h4>
-                
+                <h4 className="text-sm font-medium">Advanced controls</h4>
+
                 <label className="flex items-center gap-3 cursor-pointer group p-3 rounded-lg border border-border/50 hover:bg-secondary/20 transition-all">
                   <input
                     type="checkbox"
@@ -520,10 +468,10 @@ export const SettingsPage: React.FC = () => {
                   />
                   <div className="flex-1">
                     <div className="font-medium group-hover:text-primary transition-colors">
-                      启用并行执行
+                      Enable parallel execution
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      允许多个挖掘方向同时运行，显著加快实验速度，但会增加系统负载
+                      Run multiple research directions simultaneously — significantly faster, at the cost of higher system load
                     </div>
                   </div>
                 </label>
@@ -537,10 +485,10 @@ export const SettingsPage: React.FC = () => {
                   />
                   <div className="flex-1">
                     <div className="font-medium group-hover:text-primary transition-colors">
-                      启用质量门控
+                      Enable quality gate
                     </div>
                     <div className="text-xs text-muted-foreground">
-                      自动检测并过滤低质量因子，防止其进入下一轮迭代，保证最终结果质量
+                      Automatically detect and filter low-quality factors, preventing them from entering the next iteration and improving final result quality
                     </div>
                   </div>
                 </label>
@@ -555,15 +503,47 @@ export const SettingsPage: React.FC = () => {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Compass className="h-5 w-5" />
-                挖掘方向（参考 Alpha158(20)）
+                Research directions (Alpha158(20) reference list)
               </CardTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                选择作为默认参考的挖掘方向；启动任务时可从中选用或随机一条
-              </p>
             </CardHeader>
             <CardContent className="space-y-6">
+              {/* What this is + when it's used */}
+              <div className="rounded-lg border border-border/60 bg-secondary/20 p-4 space-y-2 text-sm">
+                <div className="flex items-center gap-2 font-semibold text-foreground">
+                  <Info className="h-4 w-4 text-primary" />
+                  What this page does (and when it matters)
+                </div>
+                <p className="text-muted-foreground">
+                  This is a <strong>preset pool of objectives</strong> derived from Alpha158's classical
+                  factor families. It's used <strong>only</strong> when you toggle{' '}
+                  <span className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5 rounded bg-primary/15 text-primary text-[11px]">
+                    <Compass className="h-3 w-3" />Custom research direction
+                  </span>{' '}
+                  on the home-page chat input. With the toggle <em>off</em> (default), your typed text in
+                  the chat box is used directly — none of these presets are consulted.
+                </p>
+                <p className="text-muted-foreground">
+                  <strong className="text-foreground">Selecting more does NOT improve mining quality.</strong>{' '}
+                  These are alternative <em>starting prompts</em>, not a multi-objective mix. The system
+                  uses one objective per run.
+                </p>
+                <ul className="text-muted-foreground space-y-1 ml-4 list-disc">
+                  <li>
+                    <strong>Use selected</strong> — when you tick the toggle and start a run, the{' '}
+                    <em>first</em> checked direction is used.
+                  </li>
+                  <li>
+                    <strong>Random</strong> — when you tick the toggle and start a run, a random one
+                    from the checked directions is used. Useful for unsupervised exploration sessions.
+                  </li>
+                </ul>
+                <p className="text-muted-foreground text-xs italic">
+                  Recommendation: leave a few you trust ticked, set mode to "Use selected", and ignore
+                  this page unless you want random preset cycling.
+                </p>
+              </div>
               <div>
-                <label className="block text-sm font-medium mb-3">使用方式</label>
+                <label className="block text-sm font-medium mb-3">Selection mode</label>
                 <div className="flex flex-wrap gap-4">
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -573,7 +553,7 @@ export const SettingsPage: React.FC = () => {
                       onChange={() => updateConfigField('miningDirectionMode', 'selected')}
                       className="h-4 w-4 text-primary focus:ring-primary"
                     />
-                    <span>使用下方选中的方向（启动时从选中中取一条或按业务逻辑使用）</span>
+                    <span>Use selected (pick one of the checked directions on start)</span>
                   </label>
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
@@ -585,7 +565,7 @@ export const SettingsPage: React.FC = () => {
                     />
                     <span className="flex items-center gap-1.5">
                       <Shuffle className="h-4 w-4" />
-                      随机（从选中方向中随机选一条）
+                      Random (pick a random one from the selected directions)
                     </span>
                   </label>
                 </div>
@@ -593,7 +573,7 @@ export const SettingsPage: React.FC = () => {
 
               <div>
                 <div className="flex items-center justify-between mb-3">
-                  <label className="text-sm font-medium">参考方向（可多选）</label>
+                  <label className="text-sm font-medium">Reference directions (multiple selection allowed)</label>
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
@@ -605,14 +585,14 @@ export const SettingsPage: React.FC = () => {
                         );
                       }}
                     >
-                      全选
+                      Select all
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={() => updateConfigField('selectedMiningDirectionIndices', [])}
                     >
-                      取消全选
+                      Clear all
                     </Button>
                   </div>
                 </div>
@@ -643,7 +623,7 @@ export const SettingsPage: React.FC = () => {
                   })}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  已选 {config.selectedMiningDirectionIndices.length} / {REFERENCE_MINING_DIRECTIONS.length} 项。
+                  Selected: {config.selectedMiningDirectionIndices.length} / {REFERENCE_MINING_DIRECTIONS.length}
                 </p>
               </div>
             </CardContent>
@@ -656,11 +636,168 @@ export const SettingsPage: React.FC = () => {
         <CardContent className="p-4 flex gap-3">
           <div className="text-xl">💡</div>
           <div className="text-sm text-muted-foreground">
-            <p className="mb-1 font-medium text-foreground">配置提示</p>
-            <p>所有配置修改后会自动保存至后端环境文件及本地浏览器缓存。涉及 API 或路径的修改，建议在保存后重启相关服务以确保生效。</p>
+            <p className="mb-1 font-medium text-foreground">Configuration tip</p>
+            <p>All config changes are automatically persisted to the backend environment file and the local browser cache. For changes involving API keys or paths, restart the related services to ensure changes take effect.</p>
           </div>
         </CardContent>
       </Card>
     </div>
+  );
+};
+
+// ─── API Tab subcomponent ───────────────────────────────────────────────────
+
+interface ApiTabProps {
+  config: SystemConfig;
+  updateConfigField: (key: keyof SystemConfig, value: any) => void;
+  showApiKey: boolean;
+  setShowApiKey: (v: boolean) => void;
+  backendStatus: 'checking' | 'online' | 'offline';
+}
+
+const ApiTab: React.FC<ApiTabProps> = ({ config, updateConfigField, showApiKey, setShowApiKey, backendStatus }) => {
+  const isClaudeCode = (config.llmProvider || '').toLowerCase() === 'claude_code';
+  const [fallbackOpen, setFallbackOpen] = useState(false);
+
+  return (
+    <Card className="glass card-hover animate-fade-in-up">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          🤖 LLM model configuration
+          <Badge variant="default">Core</Badge>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        {/* ── Active provider banner ─────────────────────────────────────── */}
+        {isClaudeCode ? (
+          <div className="rounded-lg border border-primary/40 bg-primary/5 p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <span className="font-semibold text-foreground">Active provider:</span>
+              <Badge variant="default" className="bg-primary/20 border-primary/40 text-primary">
+                Claude Code (your local CLI session)
+              </Badge>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm pt-1">
+              <div>
+                <span className="text-muted-foreground">Model:</span>{' '}
+                <span className="font-mono text-foreground">{config.claudeCodeModel || '—'}</span>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Fallback:</span>{' '}
+                <span className="font-mono text-foreground">{config.claudeCodeFallback || 'none'}</span>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground pt-1 border-t border-border/40">
+              All LLM calls are routed through your local Claude Code subscription —
+              no per-token API charges. Configured via <code className="font-mono">LLM_PROVIDER=claude_code</code> in
+              the project's <code className="font-mono">.env</code>. To change the active model,
+              edit <code className="font-mono">CLAUDE_CODE_MODEL</code> in <code className="font-mono">.env</code>.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-700/40 bg-amber-950/20 p-4">
+            <div className="flex items-center gap-2 text-sm">
+              <AlertCircle className="h-4 w-4 text-amber-300" />
+              <span className="text-amber-200">
+                Active provider: <strong>{config.llmProvider || 'unknown'}</strong> (API-key path).
+                Configure the key + URL + model below.
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── API key / OpenAI-compatible config (collapsible when not active) */}
+        <div>
+          <button
+            type="button"
+            onClick={() => setFallbackOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground"
+          >
+            {fallbackOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+            {isClaudeCode ? 'API-key fallback configuration' : 'API-key configuration'}
+            <span className="text-[10px] text-muted-foreground/70 normal-case ml-1">
+              {isClaudeCode
+                ? '(used only if Claude Code rate-limits or is unavailable)'
+                : '(active path — required)'}
+            </span>
+          </button>
+
+          {(fallbackOpen || !isClaudeCode) && (
+            <div className="mt-4 space-y-4 pl-4 border-l-2 border-border/40">
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  API Key {!isClaudeCode && <span className="text-destructive">*</span>}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={config.apiKey}
+                    onChange={(e) => updateConfigField('apiKey', e.target.value)}
+                    placeholder="sk-..."
+                    className="flex-1 rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                  />
+                  <Button variant="outline" onClick={() => setShowApiKey(!showApiKey)} className="px-3">
+                    {showApiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Any OpenAI-compatible API key works (DashScope, DeepSeek, OpenAI, etc.)
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">API Base URL</label>
+                <input
+                  type="text"
+                  value={config.apiUrl}
+                  onChange={(e) => updateConfigField('apiUrl', e.target.value)}
+                  placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1"
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium mb-2">Model name</label>
+                <select
+                  value={config.modelName}
+                  onChange={(e) => updateConfigField('modelName', e.target.value)}
+                  className="w-full rounded-lg border border-input bg-background px-4 py-2 text-sm focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+                >
+                  <option value="deepseek-v3">DeepSeek V3</option>
+                  <option value="deepseek-r1">DeepSeek R1</option>
+                  <option value="qwen-max">Qwen Max</option>
+                  <option value="qwen-plus">Qwen Plus</option>
+                  <option value="gpt-4">GPT-4</option>
+                  <option value="gpt-4-turbo">GPT-4 Turbo</option>
+                  <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Connection Status */}
+        <div className="pt-4 border-t border-border/50">
+          <div className="flex items-center gap-3">
+            <div
+              className={`h-3 w-3 rounded-full ${
+                backendStatus === 'online'
+                  ? 'bg-success animate-pulse'
+                  : backendStatus === 'offline'
+                  ? 'bg-destructive'
+                  : 'bg-warning animate-pulse'
+              }`}
+            />
+            <span className="text-sm">
+              Backend status:{' '}
+              {backendStatus === 'online' ? <span className="text-success font-medium">Connected</span> :
+               backendStatus === 'offline' ? <span className="text-destructive font-medium">Not connected</span> :
+               'Checking…'}
+            </span>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   );
 };

@@ -17,6 +17,19 @@ export type FactorQuality = 'high' | 'medium' | 'low';
 export interface TaskConfig {
   // Basic configuration
   userInput: string;
+  /** Optional human-friendly name shown on History/Models in place of the raw run timestamp. */
+  displayName?: string;
+  /** Universe to mine on — sp500 | nasdaq100 | commodities | "custom". */
+  universe?: string;
+  /** When universe="custom", the explicit ticker list. Recommend ≥30 for stable RankIC. */
+  customTickers?: string[];
+  /** Train/valid/test segment overrides (YYYY-MM-DD). All optional; defaults from conf_baseline.yaml. */
+  trainStart?: string;
+  trainEnd?: string;
+  validStart?: string;
+  validEnd?: string;
+  testStart?: string;
+  testEnd?: string;
   /** When true, use options in "Settings -> Mining Direction" (selected/random), ignoring input box content */
   useCustomMiningDirection?: boolean;
   numDirections?: number;
@@ -177,4 +190,165 @@ export interface WsMessage {
   taskId: string;
   data: any;
   timestamp: string;
+}
+
+// ─── Run history / analysis / lineage / suggester ────────────────────────────
+
+export type RunVerdict = 'robust' | 'promising' | 'regime-fit' | 'marginal' | 'broken';
+
+export interface RunSummary {
+  run_id: string;
+  log_dir: string;
+  total_trajectories: number;
+  by_phase: Record<string, number>;
+  best_rank_icir: number | null;
+  best_ir: number | null;
+  current_round: number | null;
+  current_phase: string | null;
+  directions_completed: number;
+  config: Record<string, any>;
+  saved_at: string | null;
+  created_at: string | null;
+  /** Workspace dir name this run wrote to (factor execution sandbox). May be null if not inferable. */
+  linked_workspace?: string | null;
+  /** Factor library JSON file name produced by this run. May be null if not inferable. */
+  linked_library?: string | null;
+  /** "manifest" if explicit pointer was found, "mtime" if inferred, null if neither. */
+  linkage_source?: 'manifest' | 'mtime' | null;
+  /** User-supplied human-friendly name (from manifest). */
+  display_name?: string | null;
+  /** Original objective string the user typed (from manifest). */
+  objective?: string | null;
+}
+
+export interface RunAnalysis {
+  run_id: string;
+  verdict: RunVerdict;
+  verdict_reason: string;
+  summary: string;
+  per_trajectory_notes: Array<{ trajectory_id: string; note: string }>;
+  recommended_next_steps: string[];
+  best_rank_icir: number | null;
+  best_ir: number | null;
+  rank_icir_to_ir_gap: number | null;
+  created_at: string;
+}
+
+export type TrajectoryPhase = 'original' | 'mutation' | 'crossover' | 'optimized';
+
+export interface LineageNode {
+  id: string;
+  phase: TrajectoryPhase | string;
+  round: number | null;
+  direction_id: number | null;
+  rank_icir: number | null;
+  ir: number | null;
+  ic: number | null;
+  ann_ret: number | null;
+  max_dd: number | null;
+  hypothesis: string;
+}
+
+export interface LineageEdge {
+  source: string;
+  target: string;
+}
+
+export interface SuggestedObjective {
+  title: string;
+  description: string;
+  mechanism: string;
+  primary_features: string[];
+  expected_horizon_days: number | null;
+  complexity: 'low' | 'medium' | 'high';
+  rationale_for_user: string;
+}
+
+export interface FindingsConfig {
+  repo_path: string | null;
+  repo_exists: boolean;
+  auto_publish_enabled: boolean;
+}
+
+// ─── Production model bundles (Phase 5/6) ────────────────────────────────────
+
+export interface ProductionBundle {
+  name: string;
+  path: string;
+  has_model: boolean;
+  factor_count: number;
+  saved_at: string | null;
+  market: string | null;
+  benchmark: string | null;
+  model_class: string | null;
+  model_kwargs: Record<string, any> | null;
+  train_segments: Record<string, [string, string]> | null;
+  test_ic: number | null;
+  test_rank_ic: number | null;
+  num_factors_in_metadata: number | null;
+}
+
+export interface BundleFactor {
+  name?: string;
+  expression?: string;
+  description?: string;
+  trajectory_id?: string;
+  trajectory_rank_ic?: number | null;
+}
+
+export interface BuildableWorkspace {
+  name: string;
+  path: string;
+  parquet_path: string;
+  parquet_mtime: string | null;
+  parquet_count: number;
+  /** all_factors_library_<suffix>.json that matches this workspace, if found. */
+  linked_library?: {
+    name: string;
+    path: string;
+    mtime: string | null;
+    factor_count: number;
+  } | null;
+}
+
+export interface BuildBundleParams {
+  workspace?: string;
+  baseline?: boolean;
+  outputName?: string;
+}
+
+export interface BuildBundleResult {
+  buildTaskId: string;
+  outputName: string;
+  logPath: string;
+}
+
+export interface BuildBundleStatus {
+  task: {
+    type: string;
+    pid: number;
+    cmd: string[];
+    logPath: string;
+    outputName: string;
+    status: 'running' | 'completed' | 'failed';
+    createdAt: string;
+    updatedAt?: string;
+  };
+  log: string[];
+}
+
+// ─── Universes (Phase D — universe-aware mining) ─────────────────────────────
+
+export interface UniverseSummary {
+  name: string;
+  ticker_count: number;
+  instruments_path: string;
+  /** ISO timestamp of the most-recent close.day.bin write for a sample ticker. */
+  last_data_mtime: string | null;
+  sample_ticker: string | null;
+}
+
+export interface DetectedUniverse {
+  universe: string;
+  reason: string;
 }

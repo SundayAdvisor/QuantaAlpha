@@ -34,14 +34,22 @@ class QlibFactorExperiment(_OrigQlibFactorExperiment):
 
 
 class QlibAlphaAgentScenario(QlibFactorScenario):
-    """Scenario wrapper for AlphaAgent: accepts use_local; when True uses local get_data_folder_intro (no Docker)."""
+    """Scenario wrapper for AlphaAgent: accepts use_local; when True uses local get_data_folder_intro (no Docker).
+
+    Loads prompts from QuantaAlpha's own experiment.yaml (US/SP500-aware) instead of
+    rdagent's bundled scenarios/qlib/experiment/prompts.yaml (CSI300-defaulted). The
+    rdagent file bakes Chinese A-share market context into the LLM's reasoning;
+    QuantaAlpha's file is identical in structure but populated with US examples and
+    an explicit "Market Universe" preamble.
+    """
 
     def __init__(self, use_local: bool = True, *args, **kwargs):
         from rdagent.core.scenario import Scenario
         from quantaalpha.factors.qlib_utils import get_data_folder_intro as local_get_data_folder_intro
 
         Scenario.__init__(self)
-        tpl_prefix = "scenarios.qlib.experiment.prompts"
+        # Resolved by rdagent's T() loader to <project_root>/quantaalpha/factors/prompts/experiment.yaml.
+        tpl_prefix = "quantaalpha.factors.prompts.experiment"
 
         self._background = deepcopy(
             T(f"{tpl_prefix}:qlib_factor_background").r(

@@ -1,8 +1,8 @@
 import React from 'react';
-import { Sparkles, Database, BarChart3, Settings as SettingsIcon, LogOut } from 'lucide-react';
+import { Sparkles, Database, BarChart3, Settings as SettingsIcon, LogOut, History, Boxes } from 'lucide-react';
 import { useTaskContext } from '@/context/TaskContext';
 
-export type PageId = 'home' | 'library' | 'backtest' | 'settings' | 'mining_dashboard';
+export type PageId = 'home' | 'library' | 'backtest' | 'settings' | 'mining_dashboard' | 'history' | 'bundles';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -35,10 +35,12 @@ export const Layout: React.FC<LayoutProps> = ({
   };
 
   const navItems = [
-    { id: 'home' as const, label: '因子挖掘', icon: Sparkles },
-    { id: 'library' as const, label: '因子库', icon: Database },
-    { id: 'backtest' as const, label: '回测', icon: BarChart3 },
-    { id: 'settings' as const, label: '设置', icon: SettingsIcon },
+    { id: 'home' as const, label: 'Factor Mining', icon: Sparkles },
+    { id: 'history' as const, label: 'History', icon: History },
+    { id: 'library' as const, label: 'Factor Library', icon: Database },
+    { id: 'bundles' as const, label: 'Models', icon: Boxes },
+    { id: 'backtest' as const, label: 'Backtest', icon: BarChart3 },
+    { id: 'settings' as const, label: 'Settings', icon: SettingsIcon },
   ];
 
   return (
@@ -58,7 +60,7 @@ export const Layout: React.FC<LayoutProps> = ({
               </div>
               <div>
                 <h1 className="text-xl font-bold">QuantaAlpha</h1>
-                <p className="text-xs text-muted-foreground">智能因子挖掘平台</p>
+                <p className="text-xs text-muted-foreground">Intelligent Factor Mining Platform</p>
               </div>
             </div>
 
