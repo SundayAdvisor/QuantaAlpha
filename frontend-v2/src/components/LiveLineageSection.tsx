@@ -10,11 +10,19 @@ import type { LineageEdge, LineageNode, RunSummary } from '@/types';
 interface LiveLineageSectionProps {
   isRunning: boolean;
   pollMs?: number;
+  /** Active mining task id — used to reset local state when a new task starts. */
+  taskId?: string | null;
+  /** Active task's createdAt ISO string — used to filter out older runs from
+   * the list so we don't show the previous run while the new run dir is
+   * still being created on disk. */
+  taskCreatedAt?: string | null;
 }
 
 export const LiveLineageSection: React.FC<LiveLineageSectionProps> = ({
   isRunning,
   pollMs = 15000,
+  taskId,
+  taskCreatedAt,
 }) => {
   const [run, setRun] = React.useState<RunSummary | null>(null);
   const [pool, setPool] = React.useState<any | null>(null);
@@ -23,6 +31,12 @@ export const LiveLineageSection: React.FC<LiveLineageSectionProps> = ({
   const [selectedTrajId, setSelectedTrajId] = React.useState<string | null>(null);
   const [refreshing, setRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [waitingForRun, setWaitingForRun] = React.useState(false);
+
+  // Grace window: backend's run dir mtime can drift slightly from when the
+  // mining task's createdAt was stamped on the FE side. 60 seconds covers
+  // clock skew and the gap between FE submit and worker spawn.
+  const TASK_GRACE_MS = 60_000;
 
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -33,12 +47,35 @@ export const LiveLineageSection: React.FC<LiveLineageSectionProps> = ({
         setError(listRes.error || 'Failed to list runs');
         return;
       }
-      const sorted = [...(listRes.data.runs || [])].sort((a, b) =>
+      let runs = [...(listRes.data.runs || [])];
+      // Filter out runs created BEFORE the current task started — these are
+      // stale (the previous run we don't want to show as "live").
+      if (taskCreatedAt) {
+        const taskMs = Date.parse(taskCreatedAt);
+        if (Number.isFinite(taskMs)) {
+          runs = runs.filter((r) => {
+            if (!r.created_at) return false;
+            const rMs = Date.parse(r.created_at);
+            return Number.isFinite(rMs) && rMs >= taskMs - TASK_GRACE_MS;
+          });
+        }
+      }
+      const sorted = runs.sort((a, b) =>
         (b.created_at || '').localeCompare(a.created_at || '')
       );
       const latest = sorted[0] || null;
+      if (!latest) {
+        // No matching run yet — likely the new run dir hasn't been created on
+        // disk. Keep state cleared and signal to the user.
+        setRun(null);
+        setPool(null);
+        setNodes([]);
+        setEdges([]);
+        setWaitingForRun(!!taskCreatedAt);
+        return;
+      }
+      setWaitingForRun(false);
       setRun(latest);
-      if (!latest) return;
 
       const [runRes, lineRes] = await Promise.all([
         getRun(latest.run_id),
@@ -54,17 +91,31 @@ export const LiveLineageSection: React.FC<LiveLineageSectionProps> = ({
     } finally {
       setRefreshing(false);
     }
-  }, []);
+  }, [taskCreatedAt]);
 
+  // Reset displayed state IMMEDIATELY when a new task starts (taskId changes)
+  // so the previous run is never visible while we wait for the new run dir
+  // to appear on disk. Then trigger an immediate refresh.
   React.useEffect(() => {
+    setRun(null);
+    setPool(null);
+    setNodes([]);
+    setEdges([]);
+    setSelectedTrajId(null);
+    setWaitingForRun(!!taskCreatedAt);
     refresh();
-  }, [refresh]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
 
   React.useEffect(() => {
     if (!isRunning) return;
-    const id = setInterval(refresh, pollMs);
+    // Poll fast (3s) while we don't yet have a matching run on disk —
+    // catches the new run dir as soon as the worker creates it. Once we
+    // have a run, settle into the normal pollMs cadence.
+    const interval = waitingForRun ? 3000 : pollMs;
+    const id = setInterval(refresh, interval);
     return () => clearInterval(id);
-  }, [isRunning, pollMs, refresh]);
+  }, [isRunning, pollMs, refresh, waitingForRun]);
 
   return (
     <Card>
@@ -98,7 +149,9 @@ export const LiveLineageSection: React.FC<LiveLineageSectionProps> = ({
         {!error && nodes.length === 0 && (
           <div className="text-xs text-muted-foreground py-4 text-center">
             {isRunning
-              ? 'Waiting for the first trajectory to land…'
+              ? (waitingForRun
+                  ? 'Waiting for the new run to start writing trajectories…'
+                  : 'Waiting for the first trajectory to land…')
               : 'No trajectories produced yet.'}
           </div>
         )}

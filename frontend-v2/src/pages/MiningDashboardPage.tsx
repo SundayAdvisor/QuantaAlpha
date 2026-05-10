@@ -88,7 +88,11 @@ export const MiningDashboardPage: React.FC<MiningDashboardPageProps> = ({ onNavi
            <FactorList metrics={task.metrics || null} />
         </div>
         <div className="lg:col-span-4">
-          <LiveLineageSection isRunning={task.status === 'running'} />
+          <LiveLineageSection
+            isRunning={task.status === 'running'}
+            taskId={task.taskId}
+            taskCreatedAt={task.createdAt}
+          />
         </div>
       </div>
 
