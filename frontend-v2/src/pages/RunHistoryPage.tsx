@@ -12,6 +12,7 @@ import { NamingGuide } from '@/components/NamingGuide';
 import { listRuns, getRun, getRunLineage } from '@/services/api';
 import type { LineageEdge, LineageNode, RunAnalysis, RunSummary } from '@/types';
 import { cn, formatDateTime, formatDuration } from '@/utils';
+import { useTaskContext } from '@/context/TaskContext';
 
 interface RunHistoryPageProps {
   onNavigate?: (page: PageId) => void;
@@ -72,6 +73,21 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
 
   React.useEffect(() => {
     refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refetch when a new mining task starts so the history list shows the
+  // currently-running run without the user having to manually refresh.
+  // Also poll periodically (every 8s) so a freshly-started run that
+  // appears in the backend's run dir within seconds is reflected here.
+  const { miningTask } = useTaskContext();
+  React.useEffect(() => {
+    if (miningTask?.taskId) refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [miningTask?.taskId]);
+  React.useEffect(() => {
+    const id = setInterval(() => refreshList(), 8000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

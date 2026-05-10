@@ -222,6 +222,50 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   // Start mining (real backend)
   const startRealMining = useCallback(
     async (config: TaskConfig) => {
+      // CLEAR previous task state IMMEDIATELY so the dashboard doesn't briefly
+      // show the old run while the create-task API call is in flight (the
+      // network round-trip can take 100-500ms; without this the user sees
+      // the previous run's hypothesis/metrics until setMiningTask(taskData)
+      // runs after apiStartMining resolves).
+      // Tear down any active websocket / polling for the prior task too,
+      // otherwise late websocket frames from the old task can race with the
+      // new task's setup.
+      if (miningWsRef.current) {
+        try { miningWsRef.current.close(); } catch {}
+        miningWsRef.current = null;
+      }
+      if (miningPollingRef.current) {
+        clearInterval(miningPollingRef.current);
+        miningPollingRef.current = null;
+      }
+      setMiningEquityCurve([]);
+      setMiningDrawdownCurve([]);
+      setMiningIcTimeSeries([]);
+      miningDataPointsRef.current = 0;
+
+      // Show an immediate "Starting…" placeholder so:
+      //  (a) the dashboard auto-switch fires on a fresh taskId right away
+      //      (instead of after the create-task network round-trip), and
+      //  (b) the user sees their NEW objective in the dashboard while we
+      //      wait for the backend, not the previous run's objective.
+      const pendingTaskId = `pending-${generateId()}`;
+      setMiningTask({
+        taskId: pendingTaskId,
+        status: 'running',
+        config,
+        progress: {
+          phase: 'parsing',
+          currentRound: 0,
+          totalRounds: config.maxRounds || 5,
+          progress: 0,
+          message: 'Starting mining task…',
+          timestamp: new Date().toISOString(),
+        },
+        logs: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      });
+
       try {
         // Load defaults from localStorage
         let defaults: any = {};

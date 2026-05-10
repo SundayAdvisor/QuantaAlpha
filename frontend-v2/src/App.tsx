@@ -16,17 +16,17 @@ const AppContent: React.FC = () => {
   const [currentPage, setCurrentPage] = useState<PageId>('home');
   const { miningTask } = useTaskContext();
 
-  // Auto-switch to dashboard when task starts
+  // Auto-switch to dashboard when a new mining task starts.
+  // Triggers on taskId change so a user who clicks a fresh "Start" while
+  // on home is taken to the dashboard immediately (the placeholder
+  // "pending-…" task gives us a fresh taskId before the create-task API
+  // call resolves, so the switch happens with no perceived delay and
+  // there's no window where the previous run's data is visible).
   useEffect(() => {
     if (miningTask && miningTask.status === 'running' && currentPage === 'home') {
-       // Only auto-redirect if we are on home and a new task starts
-       // But wait, user requirement says: "Don't disconnect when going back to home"
-       // So we should redirect to dashboard ONLY when a NEW task is created via ChatInput
-       // The ChatInput in HomePage calls startMining.
-       // We can detect this change.
-       setCurrentPage('mining_dashboard');
+      setCurrentPage('mining_dashboard');
     }
-  }, [miningTask?.taskId]); // Only trigger on new task ID
+  }, [miningTask?.taskId]);
 
   return (
     <>
