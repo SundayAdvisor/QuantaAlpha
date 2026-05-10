@@ -209,6 +209,11 @@ export interface RunSummary {
   config: Record<string, any>;
   saved_at: string | null;
   created_at: string | null;
+  /** Run status derived by the backend from manifest.json + saved_at recency.
+   * 'running' = no manifest, saved_at ≤ 5 min old.
+   * 'completed' = manifest.json exists.
+   * 'stale' = no manifest, saved_at > 5 min old (probably crashed/killed). */
+  status?: 'running' | 'completed' | 'stale' | 'unknown';
   /** Workspace dir name this run wrote to (factor execution sandbox). May be null if not inferable. */
   linked_workspace?: string | null;
   /** Factor library JSON file name produced by this run. May be null if not inferable. */

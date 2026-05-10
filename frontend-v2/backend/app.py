@@ -1502,13 +1502,41 @@ def _infer_run_linkages(run_summary: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _infer_run_status(run_summary: Dict[str, Any], log_root: Path) -> str:
+    """Classify a run as 'running' / 'completed' / 'stale'.
+
+    manifest.json is written by `_write_run_manifest` at task completion,
+    so its presence is a reliable "this run is done" marker. When it's
+    missing, a fresh saved_at (≤ 5 min old) means the worker is still
+    writing → running; otherwise the run probably crashed / was killed.
+    """
+    run_id = run_summary.get("run_id")
+    if not run_id:
+        return "unknown"
+    manifest_path = log_root / run_id / "manifest.json"
+    if manifest_path.exists():
+        return "completed"
+    saved_at = run_summary.get("saved_at")
+    if saved_at:
+        try:
+            saved_dt = datetime.fromisoformat(saved_at.replace("Z", "+00:00") if saved_at.endswith("Z") else saved_at)
+            age = (datetime.now(saved_dt.tzinfo) if saved_dt.tzinfo else datetime.now()) - saved_dt
+            if age.total_seconds() <= 5 * 60:
+                return "running"
+        except Exception:
+            pass
+    return "stale"
+
+
 @app.get("/api/v1/runs/list", response_model=ApiResponse)
 async def list_qa_runs():
-    """List past QA mining runs from log/. Enriched with workspace/library linkage."""
+    """List past QA mining runs from log/. Enriched with workspace/library linkage + status."""
     try:
         from quantaalpha.data.run_history import list_runs
-        runs = list_runs(_qa_log_root())
+        log_root = _qa_log_root()
+        runs = list_runs(log_root)
         for r in runs:
+            r["status"] = _infer_run_status(r, log_root)
             r.update(_infer_run_linkages(r))
         return ApiResponse(success=True, data={"runs": runs})
     except Exception as e:
@@ -1524,6 +1552,7 @@ async def get_qa_run(run_id: str):
         bundle = load_run(log_root, run_id)
         cached = load_cached_analysis(log_root, run_id)
         summary = bundle.get("summary") or {}
+        summary["status"] = _infer_run_status(summary, log_root)
         summary.update(_infer_run_linkages(summary))
         return ApiResponse(
             success=True,
