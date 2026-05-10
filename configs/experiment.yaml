@@ -124,8 +124,12 @@ quality_gate:
 # Controls factor proposal and expression generation
 # ============================================================
 factor:
-  # Number of factors to generate per hypothesis
-  factors_per_hypothesis: 3    # paper Appendix B: 3 factor expressions per hypothesis
+  # NOTE: "factors_per_hypothesis" was removed (2026-05-09) — it was dead
+  # config. The actual count is hardcoded in the LLM prompt at
+  # quantaalpha/factors/prompts/prompts.yaml ("Ensure each generation
+  # produces 2-3 factors") which matches the paper Appendix B's "3 factor
+  # expressions per hypothesis". To make it configurable, parameterize that
+  # prompt template.
 
   # Complexity constraints (important for preventing overfitting; keep symbol length under ~250)
   complexity:

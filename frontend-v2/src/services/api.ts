@@ -53,7 +53,6 @@ export interface MiningStartParams {
   numDirections?: number;
   maxRounds?: number;
   maxLoops?: number;
-  factorsPerHypothesis?: number;
   librarySuffix?: string;
   qualityGateEnabled?: boolean;
   parallelEnabled?: boolean;

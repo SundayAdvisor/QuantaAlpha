@@ -5,6 +5,7 @@ import { LiveCharts } from '@/components/LiveCharts';
 import { ChatInput } from '@/components/ChatInput';
 import { FactorStatsRow } from '@/components/FactorStatsRow';
 import { FactorList } from '@/components/FactorList';
+import { LiveLineageSection } from '@/components/LiveLineageSection';
 import { Card, CardContent } from '@/components/ui/Card';
 import { useTaskContext } from '@/context/TaskContext';
 import { Layout } from '@/components/layout/Layout';
@@ -85,6 +86,9 @@ export const MiningDashboardPage: React.FC<MiningDashboardPageProps> = ({ onNavi
         </div>
         <div className="lg:col-span-4">
            <FactorList metrics={task.metrics || null} />
+        </div>
+        <div className="lg:col-span-4">
+          <LiveLineageSection isRunning={task.status === 'running'} />
         </div>
       </div>
 

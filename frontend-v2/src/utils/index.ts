@@ -34,6 +34,19 @@ export function formatDateTime(date: string | Date): string {
   });
 }
 
+export function formatDuration(start: string | null | undefined, end: string | null | undefined): string | null {
+  if (!start || !end) return null;
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const total = Math.round(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 export function getQualityColor(quality: 'high' | 'medium' | 'low'): string {
   switch (quality) {
     case 'high':

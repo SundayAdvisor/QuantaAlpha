@@ -20,6 +20,15 @@ Legend: ✅ shipped · 🔨 building · 📋 sketch (designed, not built) · �
 | 10 | Walk-forward validation (replace fixed train/valid/test with rolling K-fold or anchored split + holdout) | 📋 sketch | [walk_forward_validation.md](walk_forward_validation.md) |
 | 11 | QC integration — QAAlphaModel consumes QA bundles inside QuantConnect strategies | 📋 sketch | [qc_multi_strategy_architecture.md](qc_multi_strategy_architecture.md), QC's [phase_11_qa_integration.md](../../QuantaQC/docs/phase_11_qa_integration.md) |
 | 12 | Future — more universes (DJIA, sector ETFs, FX), fresh-data inference (predict tomorrow without re-mining), multi-model bundles, retraining cadence | 💭 future | _(no spec yet)_ |
+| **13** | **Admission gate upgrades** — Deflated Sharpe Ratio + Combinatorial Purged CV + triple-barrier labels + AST-novelty dedup. Highest-ROI honesty fix. ~1 day. | 📋 next-up | [phase_13_admission_gate_upgrades.md](phase_13_admission_gate_upgrades.md) |
+| **14** | **QuantaResearch (idea sourcing)** — new sibling project: arXiv crawler + LLM hypothesis formalizer + data-readiness check + auto-feed into QA. Replaces "user types objective" with "system proposes from academic flow." ~1-2 days. | 📋 sketch | [phase_14_quantaresearch.md](phase_14_quantaresearch.md) |
+| **15** | **HMM regime detection** — Renaissance-style 3-state hidden Markov model on SPY (calm / normal / turbulent). Exposed as `$regime` qlib feature + strategy-execution gate. Includes per-regime strategy mapping. ~half day. | 📋 next-up | [phase_15_hmm_regime_layer.md](phase_15_hmm_regime_layer.md) |
+| **16** | **Signal stacking** — explicit alpha combiner: 5 combiner functions (equal-weight / IC-weighted / inverse-var / LightGBM / HRP) benchmarked side-by-side, per-factor contribution attribution, regime-conditional fits, online weight refresh. The Renaissance principle as code. ~2-3 days. | 📋 sketch | [phase_16_signal_stacking.md](phase_16_signal_stacking.md) |
+| **17** | **Continuous redevelopment / training cadence** — answer to "Renaissance retrains every 2yr; should we?". 4 training-window presets (paper-aligned / recent-regime / stress-test / walk-forward) in FE Advanced panel + bundle A/B compare harness. ~half day for v1. | 📋 next-up | [phase_17_continuous_redevelopment.md](phase_17_continuous_redevelopment.md) |
+| **18** | **Factor memory service** — adopt MemGovern's (arXiv 2601.06789) pattern: factor pool becomes a queryable HTTP service on :8002 + 2 LLM tools (`/search_factor_experience`, `/get_factor_card`) so the LLM stops re-discovering failed factors every iteration. Curated cards, not raw history. ~1-2 days. | 📋 next-up | [phase_18_factor_memory_service.md](phase_18_factor_memory_service.md) |
+| **19** | **Slot-based mutation** — adopt EvoControl's (arXiv 2601.07348) pattern: define explicit slots (window / feature / transform / normalization / binary_op) in factor expressions, mutate one slot at a time instead of full-expression rewrite. Plus diversified initialization + combinatorial sweep on promotion. Claims 30-80% iteration reduction. ~3-5 days. | 📋 sketch | [phase_19_slot_based_mutation.md](phase_19_slot_based_mutation.md) |
+| ★ | **Full research pipeline** — the "real quant" 10-stage workflow surrounding QA + QC (idea sourcing, hypothesis formalization, data readiness, risk decomposition, decay monitoring, knowledge persistence). Spans this repo + a proposed sibling `QuantaResearch` + QC. **Index document** — phases 13-19 are the buildable pieces. | 📋 plan | [research_pipeline.md](research_pipeline.md) |
+| 📚 | **Math-heavy methods reference** — practical survey of techniques quant firms (Renaissance, AQR, Two Sigma) actually use: DSR / CPCV / HMM / Kalman / cointegration / GARCH / mutual info / transfer entropy / causal inference / random matrix theory / triple-barrier / fractional differencing / meta-labeling. Library + code sketch + connection to QA per technique. **Reading material**, not a build phase. | 📚 reference | [math_heavy_methods.md](math_heavy_methods.md) |
 
 ## Order of operations (the "what's next" recommendation)
 
@@ -32,16 +41,36 @@ Suggested next, in order:
                                 whole pipeline 1–7 actually works end-to-end
                                 with non-trivial data.
 
-  → phase 8   (~1 hr)           backfill the linkage for older runs. Cheap
-                                quality-of-life. Defer until phase 9 lands.
+  → phase 13  (~1 day)          admission gate upgrades — DSR + CPCV +
+                                AST-novelty dedup. Cheapest, highest-impact
+                                honesty fix. Ship before any new stages.
 
-  → phase 10  (3–5 hrs option-A) walk-forward — only worth it once phase 9
-                                shows in-sample bias is hurting deployment
-                                decisions.
+  → phase 17  (~half day)       training-window presets in FE Advanced —
+                                lets us A/B paper-aligned vs recent-regime
+                                without code changes per run.
 
-  → phase 11  (5–7 days, multi-step) QC integration. Has its own
-                                checkpoint plan. Defer until you have a
-                                factor-trained bundle to feed in (phase 9).
+  → phase 15  (~half day)       HMM regime detection. Renaissance-style.
+                                Standalone — feeds phase 16.
+
+  → phase 14  (1–2 days)        QuantaResearch idea sourcer. Auto-feed
+                                arXiv-derived hypotheses into QA mining.
+
+  → phase 16  (2–3 days)        signal stacking — explicit alpha combiner.
+                                Builds on 13 + 15.
+
+  → phase 18  (1–2 days)        factor memory service (MemGovern-style).
+                                Stops LLM rediscovering failed factors.
+
+  → phase 19  (3–5 days)        slot-based mutation (EvoControl-style).
+                                30-50% iteration reduction. After 18.
+
+  → phase 8   (~1 hr)           backfill linkage for older runs. Cosmetic.
+
+  → phase 10  (3–5 hrs option-A) walk-forward — only worth it after 13
+                                lands (CPCV is the foundation).
+
+  → phase 11  (5–7 days, multi-step) QC integration. Defer until you have
+                                a factor-trained bundle to feed in (phase 9).
 
   → phase 12  (anytime)         more universes / inference / retraining.
                                 These are loose; pick what's blocking you.

@@ -7,10 +7,11 @@ import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { AnalysisCard } from '@/components/AnalysisCard';
 import { LineageGraph } from '@/components/LineageGraph';
+import { TrajectoryDetailPanel } from '@/components/TrajectoryDetailPanel';
 import { NamingGuide } from '@/components/NamingGuide';
 import { listRuns, getRun, getRunLineage } from '@/services/api';
 import type { LineageEdge, LineageNode, RunAnalysis, RunSummary } from '@/types';
-import { cn, formatDateTime } from '@/utils';
+import { cn, formatDateTime, formatDuration } from '@/utils';
 
 interface RunHistoryPageProps {
   onNavigate?: (page: PageId) => void;
@@ -40,6 +41,11 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
   const [listErr, setListErr] = React.useState<string | null>(null);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [detail, setDetail] = React.useState<RunDetailState>(EMPTY_DETAIL);
+  const [selectedTrajId, setSelectedTrajId] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    setSelectedTrajId(null);
+  }, [selectedId]);
 
   const refreshList = React.useCallback(async () => {
     setLoadingList(true);
@@ -172,6 +178,9 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
                 </div>
                 <div className="text-[10px] text-muted-foreground mt-0.5">
                   IR={r.best_ir != null ? r.best_ir.toFixed(3) : '—'} · phase={r.current_phase || '—'}
+                  {formatDuration(r.created_at, r.saved_at) && (
+                    <> · <span className="font-mono text-foreground/80">{formatDuration(r.created_at, r.saved_at)}</span></>
+                  )}
                 </div>
                 {/* Linkage chips */}
                 {(r.linked_workspace || r.linked_library) && (
@@ -254,6 +263,19 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
                         {detail.summary.directions_completed > 0 && (
                           <>{' · '}{detail.summary.directions_completed} directions completed</>
                         )}
+                        {formatDuration(detail.summary.created_at, detail.summary.saved_at) && (
+                          <>
+                            {' · '}duration{' '}
+                            <span className="font-mono text-foreground/80">
+                              {formatDuration(detail.summary.created_at, detail.summary.saved_at)}
+                            </span>
+                            {detail.summary.created_at && detail.summary.saved_at && (
+                              <span className="text-muted-foreground/70">
+                                {' '}({formatDateTime(detail.summary.created_at)} → {formatDateTime(detail.summary.saved_at)})
+                              </span>
+                            )}
+                          </>
+                        )}
                       </div>
                       {(detail.summary.linked_workspace || detail.summary.linked_library) && (
                         <div className="flex gap-2 mt-2 flex-wrap text-[11px]">
@@ -308,11 +330,22 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
                 <CardContent className="py-4 space-y-2">
                   <div className="text-sm font-semibold text-foreground flex items-center gap-2">
                     <GitBranch className="size-4" /> Lineage
+                    <span className="text-[10px] font-normal text-muted-foreground ml-2">
+                      Click a node for details
+                    </span>
                   </div>
                   <LineageGraph
                     nodes={detail.lineage.nodes}
                     edges={detail.lineage.edges}
+                    selectedId={selectedTrajId}
+                    onSelect={(id) => setSelectedTrajId((cur) => (cur === id ? null : id))}
                     height={520}
+                  />
+                  <TrajectoryDetailPanel
+                    selectedId={selectedTrajId}
+                    nodes={detail.lineage.nodes}
+                    pool={detail.pool}
+                    onClose={() => setSelectedTrajId(null)}
                   />
                 </CardContent>
               </Card>
