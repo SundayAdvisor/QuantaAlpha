@@ -9,6 +9,38 @@ interface TrajectoryDetailPanelProps {
   onClose: () => void;
 }
 
+const FactorCard: React.FC<{ factor: any; index: number }> = ({ factor, index }) => {
+  const [showCode, setShowCode] = React.useState(false);
+  const code: string = factor.code || '';
+  return (
+    <div className="rounded border border-border bg-background/40 p-2">
+      <div className="font-mono text-foreground text-[11px]">{factor.name || `factor_${index}`}</div>
+      <div className="font-mono text-muted-foreground text-[10px] break-all mt-0.5">
+        {factor.expression}
+      </div>
+      {factor.description && (
+        <div className="text-[10px] text-foreground/70 mt-1 line-clamp-2">{factor.description}</div>
+      )}
+      {code && (
+        <div className="mt-1.5 pt-1.5 border-t border-border">
+          <button
+            type="button"
+            onClick={() => setShowCode((s) => !s)}
+            className="text-[10px] font-mono text-primary hover:text-primary/80 transition-colors"
+          >
+            {showCode ? '▼ hide code' : `▶ show code (${code.length} chars)`}
+          </button>
+          {showCode && (
+            <pre className="mt-1 max-h-80 overflow-auto rounded bg-background/60 border border-border p-2 text-[10px] font-mono text-foreground/85 leading-relaxed whitespace-pre">
+              {code}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
 export const TrajectoryDetailPanel: React.FC<TrajectoryDetailPanelProps> = ({
   selectedId,
   nodes,
@@ -83,15 +115,7 @@ export const TrajectoryDetailPanel: React.FC<TrajectoryDetailPanelProps> = ({
           </div>
           <div className="space-y-1.5">
             {factors.map((f: any, i: number) => (
-              <div key={i} className="rounded border border-border bg-background/40 p-2">
-                <div className="font-mono text-foreground text-[11px]">{f.name}</div>
-                <div className="font-mono text-muted-foreground text-[10px] break-all mt-0.5">
-                  {f.expression}
-                </div>
-                {f.description && (
-                  <div className="text-[10px] text-foreground/70 mt-1 line-clamp-2">{f.description}</div>
-                )}
-              </div>
+              <FactorCard key={i} factor={f} index={i} />
             ))}
           </div>
         </div>

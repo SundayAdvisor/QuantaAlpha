@@ -293,8 +293,36 @@ class FactorLibraryManager:
 
     @staticmethod
     def _extract_backtest_results(experiment) -> dict:
-        """Extract backtest metrics from experiment.result (pandas Series) as dict."""
+        """Extract backtest metrics from experiment.result (pandas Series) as dict.
+
+        Falls back to reading qlib_res.csv directly from the experiment's
+        combined workspace when experiment.result is None. Upstream rdagent's
+        QlibFBWorkspace.execute() returns None whenever ret.pkl isn't
+        produced (it requires `portfolio_analysis/report_normal_1day.pkl`
+        from a PortAnaRecord step) — but qlib_res.csv with IC/ICIR/RankIC/
+        RankICIR/l2.train/l2.valid IS still written. Without this fallback
+        the entire factor library shows zeros.
+        """
         result = getattr(experiment, "result", None)
+        if result is None:
+            ws = getattr(experiment, "experiment_workspace", None)
+            ws_path = getattr(ws, "workspace_path", None) if ws is not None else None
+            if ws_path is not None:
+                csv_path = Path(str(ws_path)) / "qlib_res.csv"
+                if csv_path.exists():
+                    try:
+                        df = pd.read_csv(csv_path, index_col=0)
+                        if not df.empty and df.shape[1] >= 1:
+                            result = df.iloc[:, 0]
+                            logger.info(
+                                f"_extract_backtest_results: experiment.result was None, "
+                                f"recovered {len(result)} metrics from {csv_path}"
+                            )
+                    except Exception as e:
+                        logger.warning(
+                            f"_extract_backtest_results: failed to read qlib_res.csv "
+                            f"fallback at {csv_path}: {e}"
+                        )
         if result is None:
             return {}
         if isinstance(result, pd.Series):
