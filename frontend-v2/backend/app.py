@@ -328,6 +328,39 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
                 override_dir = Path(env["WORKSPACE_PATH"]) / "_template_override"
                 override_dir.mkdir(parents=True, exist_ok=True)
                 template_root = PROJECT_ROOT / "quantaalpha" / "factors" / "factor_template"
+
+                # CLAMP testEnd / trainEnd / validEnd to the qlib bundle's
+                # actual last bar date. If the conf asks for data past what
+                # the bundle has (e.g. testEnd = today but bundle only goes
+                # to yesterday), qlib's PortAnaRecord silently fails and we
+                # never get information_ratio / 1day.* portfolio metrics.
+                # Read calendars/day.txt to find the bundle's last date.
+                try:
+                    qlib_root = PROJECT_ROOT / "data" / "qlib" / "us_data"
+                    cal_path = qlib_root / "calendars" / "day.txt"
+                    bundle_last = None
+                    if cal_path.exists():
+                        lines = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                        if lines:
+                            bundle_last = lines[-1]
+                    def _clamp(date_str):
+                        if not date_str or not bundle_last:
+                            return date_str
+                        return min(date_str, bundle_last)
+                    if bundle_last:
+                        before = (req.trainEnd, req.validEnd, req.testEnd)
+                        req.trainEnd = _clamp(req.trainEnd)
+                        req.validEnd = _clamp(req.validEnd)
+                        req.testEnd = _clamp(req.testEnd)
+                        if (req.trainEnd, req.validEnd, req.testEnd) != before:
+                            print(
+                                f"[mining] clamped date ranges to bundle's last bar "
+                                f"({bundle_last}): {before} -> "
+                                f"({req.trainEnd}, {req.validEnd}, {req.testEnd})"
+                            )
+                except Exception as exc:
+                    print(f"[mining] date-clamp pre-check failed (will use original dates): {exc}")
+
                 for tpl_name in ("conf_baseline.yaml", "conf_combined_factors.yaml"):
                     src = template_root / tpl_name
                     if not src.exists():
