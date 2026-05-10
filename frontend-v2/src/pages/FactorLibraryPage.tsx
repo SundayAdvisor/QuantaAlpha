@@ -15,6 +15,7 @@ import {
   Calendar,
   BarChart3,
   AlertCircle,
+  Info,
 } from 'lucide-react';
 
 export const FactorLibraryPage: React.FC = () => {
@@ -214,12 +215,13 @@ export const FactorLibraryPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="glass card-hover">
+        <Card className="glass card-hover" title="Information Ratio (IR) > 0.5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">High quality</div>
                 <div className="text-2xl font-bold mt-1 text-success">{stats.high}</div>
+                <div className="text-[10px] font-mono text-success/70 mt-0.5">IR &gt; 0.5</div>
               </div>
               <div className="p-3 rounded-lg bg-success/20">
                 <TrendingUp className="h-6 w-6 text-success" />
@@ -228,12 +230,13 @@ export const FactorLibraryPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="glass card-hover">
+        <Card className="glass card-hover" title="0.1 < Information Ratio (IR) ≤ 0.5">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">Medium quality</div>
                 <div className="text-2xl font-bold mt-1 text-warning">{stats.medium}</div>
+                <div className="text-[10px] font-mono text-warning/70 mt-0.5">0.1 &lt; IR ≤ 0.5</div>
               </div>
               <div className="p-3 rounded-lg bg-warning/20">
                 <BarChart3 className="h-6 w-6 text-warning" />
@@ -242,12 +245,13 @@ export const FactorLibraryPage: React.FC = () => {
           </CardContent>
         </Card>
 
-        <Card className="glass card-hover">
+        <Card className="glass card-hover" title="Information Ratio (IR) ≤ 0.1, or no IR available">
           <CardContent className="p-4">
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-sm text-muted-foreground">Low quality</div>
                 <div className="text-2xl font-bold mt-1 text-destructive">{stats.low}</div>
+                <div className="text-[10px] font-mono text-destructive/70 mt-0.5">IR ≤ 0.1</div>
               </div>
               <div className="p-3 rounded-lg bg-destructive/20">
                 <BarChart3 className="h-6 w-6 text-destructive" />
@@ -256,6 +260,64 @@ export const FactorLibraryPage: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* Quality classification key — explains how high/medium/low are assigned */}
+      <Card className="glass border-border/50">
+        <CardContent className="py-3 px-4">
+          <details className="group">
+            <summary className="flex items-center gap-2 cursor-pointer text-sm text-muted-foreground hover:text-foreground transition-colors list-none">
+              <Info className="h-4 w-4" />
+              <span className="font-medium">How is quality decided?</span>
+              <span className="text-[10px] ml-auto group-open:hidden">click to expand</span>
+            </summary>
+            <div className="mt-3 space-y-2 text-xs text-muted-foreground leading-relaxed">
+              <p>
+                Quality is computed from the factor's <strong className="text-foreground font-mono">Information Ratio</strong>{' '}
+                (IR) on the Lean / qlib backtest — specifically{' '}
+                <code className="font-mono text-foreground/80">1day.excess_return_without_cost.information_ratio</code>{' '}
+                (or the with-cost variant when only that's available). IR is the
+                annualized excess return divided by tracking error — higher means
+                more consistent edge, lower means noise or marginal signal.
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-2 pt-2">
+                <div className="rounded border border-success/30 bg-success/5 px-3 py-2">
+                  <div className="text-success font-mono text-[11px] font-semibold">High</div>
+                  <div className="font-mono text-[11px] mt-0.5">IR &gt; 0.5</div>
+                  <div className="text-[10px] text-muted-foreground mt-1">Strong, consistent edge.</div>
+                </div>
+                <div className="rounded border border-warning/30 bg-warning/5 px-3 py-2">
+                  <div className="text-warning font-mono text-[11px] font-semibold">Medium</div>
+                  <div className="font-mono text-[11px] mt-0.5">0.1 &lt; IR ≤ 0.5</div>
+                  <div className="text-[10px] text-muted-foreground mt-1">
+                    Real but modest edge, or no IR found in the metrics dict.
+                  </div>
+                </div>
+                <div className="rounded border border-destructive/30 bg-destructive/5 px-3 py-2">
+                  <div className="text-destructive font-mono text-[11px] font-semibold">Low</div>
+                  <div className="font-mono text-[11px] mt-0.5">IR ≤ 0.1</div>
+                  <div className="text-[10px] text-muted-foreground mt-1">
+                    Weak/noisy. Also: empty <code className="font-mono">backtest_results</code>{' '}
+                    falls here.
+                  </div>
+                </div>
+              </div>
+              <p className="pt-2 text-[11px] text-muted-foreground/80">
+                <strong className="text-foreground/80">Note:</strong> IR comes from qlib's{' '}
+                <code className="font-mono">PortAnaRecord</code> step, which only fires on a
+                successful backtest. If your bundle's date range doesn't cover the configured
+                test period, PortAnaRecord won't run and every factor will land in "Low" until
+                the bundle is refreshed (see{' '}
+                <code className="font-mono">docs/data_setup.md</code>).
+              </p>
+              <p className="text-[11px] text-muted-foreground/80">
+                Source:{' '}
+                <code className="font-mono">_classify_quality()</code> in{' '}
+                <code className="font-mono">frontend-v2/backend/app.py</code>.
+              </p>
+            </div>
+          </details>
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card className="glass">
