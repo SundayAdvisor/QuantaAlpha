@@ -2,13 +2,22 @@
 
 How to populate / refresh the qlib binary data QuantaAlpha mines on.
 
-> **TL;DR for a fresh setup:**
+> **TL;DR for a fresh setup (or to recover from "all metrics show 0" — see § [Symptom-driven](#symptom-driven-recovery)):**
 > ```bash
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --tickers GLD IAU GDX GDXJ SLV USO UNG DBC GSG PDBC
+> # IMPORTANT: --start 2008-01-02 is required so training segments (2008-2015)
+> # have actual data. Without this you'll get qlib_res.csv but PortAnaRecord
+> # silently fails -> empty backtest_results in the factor library.
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500       --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100   --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --tickers GLD IAU GDX GDXJ SLV USO UNG DBC GSG PDBC --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
 > ```
-> See [§ Cookbook](#cookbook) for variations.
+> Expect ~15-25 min wall time (yfinance throttling). After it finishes, run
+> the [§ Verification step](#verifying-you-have-enough-data) before kicking
+> off a mining task — if the verification check fails, your factor library
+> entries will show 0s for IC/RankIC/etc. even though mining "succeeds."
+>
+> See [§ Cookbook](#cookbook) for incremental refreshes, custom universes,
+> and recovery scenarios.
 
 ## What we have
 
@@ -38,8 +47,18 @@ data/qlib/us_data/
         └── change.day.bin       # close-to-close return
 ```
 
-**Calendar coverage** (after the cookbook): 1999-12-31 → 2026-05-07
-(~6,627 trading days).
+**Calendar coverage** (after the cookbook): 1999-12-31 → today
+(~6,600+ trading days).
+
+**⚠️ The calendar can extend further than the actual ticker bins.**
+The fetch script writes the calendar from union of all dates it touches,
+but each ticker's `.bin` only covers the dates yfinance returned for it.
+If you ran an early-version of the fetch script that only pulled forward
+from 2020-11-11, your `day.txt` will still LOOK like it spans 2000-today
+but `features/<ticker>/close.day.bin` only contains data from 2020-11-11
+onward. **This is the silent killer behind "all factor metrics are 0" —
+qlib's PortAnaRecord can't run a backtest when the test segment extends
+beyond available data.** See [§ Verification](#verifying-you-have-enough-data).
 
 ## Universes available out of the box
 
@@ -105,6 +124,51 @@ echo -e "AAPL\t1990-01-01\t2099-12-31\nMSFT\t1990-01-01\t2099-12-31\n…" \
 Use the FE Advanced panel → universe dropdown → "custom" → paste tickers.
 QA will write a temp `custom_<suffix>.txt` for that run only.
 
+## Verifying you have enough data
+
+Before kicking off a mining task, sanity-check the bundle's actual ticker
+coverage (not just the calendar):
+
+```bash
+.venv/Scripts/python.exe -c "
+import struct
+from pathlib import Path
+root = Path('data/qlib/us_data')
+cal = root.joinpath('calendars/day.txt').read_text().strip().split()
+print(f'Calendar: {len(cal)} days, {cal[0]} -> {cal[-1]}')
+for t in ('spy', 'aapl', 'msft', 'jnj', 'ko'):
+    p = root / 'features' / t / 'close.day.bin'
+    if not p.exists():
+        print(f'  {t}: MISSING'); continue
+    data = p.read_bytes()
+    start_idx = int(struct.unpack('<f', data[:4])[0])
+    n = (len(data) // 4) - 1
+    print(f'  {t}: {cal[start_idx]} -> {cal[start_idx + n - 1]}  ({n} bars)')
+"
+```
+
+✅ **Healthy output** — every sample ticker spans at minimum from before
+your earliest train date (e.g. `2008-01-02`) through near today:
+
+```
+Calendar: 6627 days, 1999-12-31 -> 2026-05-07
+  spy:  2008-01-02 -> 2026-05-07  (4623 bars)
+  aapl: 2008-01-02 -> 2026-05-07  (4623 bars)
+  ...
+```
+
+❌ **Broken output** — sample tickers start way after the train segment:
+
+```
+Calendar: 6627 days, 1999-12-31 -> 2026-05-07
+  spy:  2020-11-11 -> 2026-05-07  (1377 bars)   ← only 5 years of data
+  ...
+```
+
+If you see the broken pattern, **your training segments will use no data,
+PortAnaRecord will silently fail, and the factor library will save zeros.**
+Re-run the TL;DR fetch with `--start 2008-01-02 --rebuild` to fix.
+
 ## Cookbook — common scenarios
 
 ### Fresh machine, never fetched anything
@@ -112,11 +176,22 @@ QA will write a temp `custom_<suffix>.txt` for that run only.
 ```bash
 cd /path/to/QuantaAlpha
 # Default sp500/nasdaq100 instruments files ship with the repo
-# (they're tab-separated TICKER<TAB>start<TAB>end lines)
-.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500    # ~10-15 min
-.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100 # ~5 min
-.venv/Scripts/python.exe scripts/fetch_qlib_data.py --tickers GLD IAU GDX GDXJ SLV SIVR PPLT USO UNG DBC DBA GSG PDBC # ~1 min
+# (they're tab-separated TICKER<TAB>start<TAB>end lines).
+# IMPORTANT: explicit --start 2008-01-02 so training segments have data.
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500     --start 2008-01-02 --rebuild  # ~10-15 min
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100 --start 2008-01-02 --rebuild  # ~5 min
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --tickers GLD IAU GDX GDXJ SLV SIVR PPLT USO UNG DBC DBA GSG PDBC --start 2008-01-02 --rebuild  # ~1 min
 ```
+
+### Symptom-driven recovery
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Factor library shows IC=0, RankIC=0, l2.train=0 for every entry | Bundle's per-ticker bins start later than your train segment (e.g. data starts 2020-11-11 but train wants 2008-2015) | Re-fetch with `--start 2008-01-02 --rebuild` |
+| `qlib_res.csv` exists in workspace but library still shows 0 | Old version of `library.py` extracted from `experiment.result` only, didn't fall back to disk | Already fixed — `_extract_backtest_results` now reads `qlib_res.csv` directly when `experiment.result is None` |
+| `qlib_res.csv` has only IC/RankIC/l2.* but no `1day.*` portfolio metrics | PortAnaRecord ran but couldn't complete the strategy backtest (data range too short or missing) | Refresh data with full historical depth + matching `--end` to your `test_end` |
+| `report_normal_1day.pkl` missing → `ret.pkl` missing | PortAnaRecord couldn't write portfolio analysis | Same as above — full historical bundle |
+| `instruments/<universe>.txt` lists tickers but their `.bin` files are missing | Tickers were delisted between fetches | Harmless — universe loader skips them |
 
 ### Catching data up after a few weeks
 
