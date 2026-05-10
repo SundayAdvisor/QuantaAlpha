@@ -12,6 +12,7 @@ import { NamingGuide } from '@/components/NamingGuide';
 import { listRuns, getRun, getRunLineage } from '@/services/api';
 import type { LineageEdge, LineageNode, RunAnalysis, RunSummary } from '@/types';
 import { cn, formatDateTime, formatDuration } from '@/utils';
+import { useTaskContext } from '@/context/TaskContext';
 
 interface RunHistoryPageProps {
   onNavigate?: (page: PageId) => void;
@@ -72,6 +73,21 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
 
   React.useEffect(() => {
     refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Refetch when a new mining task starts so the history list shows the
+  // currently-running run without the user having to manually refresh.
+  // Also poll periodically (every 8s) so a freshly-started run that
+  // appears in the backend's run dir within seconds is reflected here.
+  const { miningTask } = useTaskContext();
+  React.useEffect(() => {
+    if (miningTask?.taskId) refreshList();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [miningTask?.taskId]);
+  React.useEffect(() => {
+    const id = setInterval(() => refreshList(), 8000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -150,8 +166,21 @@ export const RunHistoryPage: React.FC<RunHistoryPageProps> = ({ onNavigate }) =>
                 )}
               >
                 {/* Display name (if set) is primary; date is fallback. Date always shown as subtext. */}
-                <div className="text-sm font-semibold text-foreground truncate">
-                  {r.display_name || (r.created_at ? formatDateTime(r.created_at) : 'unknown date')}
+                <div className="flex items-center gap-1.5">
+                  <div className="text-sm font-semibold text-foreground truncate flex-1">
+                    {r.display_name || (r.created_at ? formatDateTime(r.created_at) : 'unknown date')}
+                  </div>
+                  {r.status === 'running' && (
+                    <span className="text-[9px] font-mono uppercase tracking-wider rounded border border-emerald-700/40 bg-emerald-950/30 text-emerald-300 px-1.5 py-0.5 flex items-center gap-1">
+                      <span className="size-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      live
+                    </span>
+                  )}
+                  {r.status === 'stale' && (
+                    <span className="text-[9px] font-mono uppercase tracking-wider rounded border border-amber-700/40 bg-amber-950/30 text-amber-300 px-1.5 py-0.5" title="No manifest written and last write >5 min ago — probably crashed or was killed">
+                      stale
+                    </span>
+                  )}
                 </div>
                 {r.display_name && r.created_at && (
                   <div className="text-[10px] text-muted-foreground">

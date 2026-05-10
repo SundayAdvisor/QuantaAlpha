@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -328,6 +328,39 @@ async def _run_mining(task_id: str, req: MiningStartRequest):
                 override_dir = Path(env["WORKSPACE_PATH"]) / "_template_override"
                 override_dir.mkdir(parents=True, exist_ok=True)
                 template_root = PROJECT_ROOT / "quantaalpha" / "factors" / "factor_template"
+
+                # CLAMP testEnd / trainEnd / validEnd to the qlib bundle's
+                # actual last bar date. If the conf asks for data past what
+                # the bundle has (e.g. testEnd = today but bundle only goes
+                # to yesterday), qlib's PortAnaRecord silently fails and we
+                # never get information_ratio / 1day.* portfolio metrics.
+                # Read calendars/day.txt to find the bundle's last date.
+                try:
+                    qlib_root = PROJECT_ROOT / "data" / "qlib" / "us_data"
+                    cal_path = qlib_root / "calendars" / "day.txt"
+                    bundle_last = None
+                    if cal_path.exists():
+                        lines = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+                        if lines:
+                            bundle_last = lines[-1]
+                    def _clamp(date_str):
+                        if not date_str or not bundle_last:
+                            return date_str
+                        return min(date_str, bundle_last)
+                    if bundle_last:
+                        before = (req.trainEnd, req.validEnd, req.testEnd)
+                        req.trainEnd = _clamp(req.trainEnd)
+                        req.validEnd = _clamp(req.validEnd)
+                        req.testEnd = _clamp(req.testEnd)
+                        if (req.trainEnd, req.validEnd, req.testEnd) != before:
+                            print(
+                                f"[mining] clamped date ranges to bundle's last bar "
+                                f"({bundle_last}): {before} -> "
+                                f"({req.trainEnd}, {req.validEnd}, {req.testEnd})"
+                            )
+                except Exception as exc:
+                    print(f"[mining] date-clamp pre-check failed (will use original dates): {exc}")
+
                 for tpl_name in ("conf_baseline.yaml", "conf_combined_factors.yaml"):
                     src = template_root / tpl_name
                     if not src.exists():
@@ -611,6 +644,49 @@ async def health_check():
 @app.post("/api/v1/mining/start", response_model=ApiResponse)
 async def start_mining(req: MiningStartRequest):
     """Start a new factor mining experiment."""
+    # Validate date ranges against the qlib bundle's actual coverage.
+    # Asking for data past last_date causes qlib's PortAnaRecord to fail
+    # silently (no report_normal_1day.pkl) which strips IR and the rich
+    # 1day.* portfolio metrics from every trajectory.
+    bundle = _qlib_bundle_info()
+    if bundle.get("is_missing"):
+        return ApiResponse(
+            success=False,
+            error=(
+                "qlib data bundle is missing. Run "
+                "`.venv/Scripts/python.exe scripts/fetch_qlib_data.py "
+                "--universe sp500 --start 2008-01-02 --rebuild` first. "
+                "See docs/data_setup.md."
+            ),
+        )
+    bundle_last = bundle.get("last_date")
+    bundle_first = bundle.get("first_date")
+    if bundle_last and bundle_first:
+        # Collect the date fields the user submitted
+        offenders = []
+        for label, value in (
+            ("trainStart", req.trainStart), ("trainEnd", req.trainEnd),
+            ("validStart", req.validStart), ("validEnd", req.validEnd),
+            ("testStart", req.testStart),   ("testEnd", req.testEnd),
+        ):
+            if value and value > bundle_last:
+                offenders.append(f"{label}={value}")
+            elif value and value < bundle_first:
+                offenders.append(f"{label}={value} (before bundle start)")
+        if offenders:
+            return ApiResponse(
+                success=False,
+                error=(
+                    f"Date(s) outside the qlib bundle's coverage "
+                    f"({bundle_first} -> {bundle_last}): "
+                    + ", ".join(offenders)
+                    + ". Either pick dates inside that range OR refresh the "
+                    "bundle: `.venv/Scripts/python.exe scripts/fetch_qlib_data.py "
+                    "--extend` (forward only) or `--universe sp500 --start "
+                    f"{bundle_first} --rebuild` (full)."
+                ),
+            )
+
     task_id = _gen_id()
     task = {
         "taskId": task_id,
@@ -1502,13 +1578,41 @@ def _infer_run_linkages(run_summary: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _infer_run_status(run_summary: Dict[str, Any], log_root: Path) -> str:
+    """Classify a run as 'running' / 'completed' / 'stale'.
+
+    manifest.json is written by `_write_run_manifest` at task completion,
+    so its presence is a reliable "this run is done" marker. When it's
+    missing, a fresh saved_at (≤ 5 min old) means the worker is still
+    writing → running; otherwise the run probably crashed / was killed.
+    """
+    run_id = run_summary.get("run_id")
+    if not run_id:
+        return "unknown"
+    manifest_path = log_root / run_id / "manifest.json"
+    if manifest_path.exists():
+        return "completed"
+    saved_at = run_summary.get("saved_at")
+    if saved_at:
+        try:
+            saved_dt = datetime.fromisoformat(saved_at.replace("Z", "+00:00") if saved_at.endswith("Z") else saved_at)
+            age = (datetime.now(saved_dt.tzinfo) if saved_dt.tzinfo else datetime.now()) - saved_dt
+            if age.total_seconds() <= 5 * 60:
+                return "running"
+        except Exception:
+            pass
+    return "stale"
+
+
 @app.get("/api/v1/runs/list", response_model=ApiResponse)
 async def list_qa_runs():
-    """List past QA mining runs from log/. Enriched with workspace/library linkage."""
+    """List past QA mining runs from log/. Enriched with workspace/library linkage + status."""
     try:
         from quantaalpha.data.run_history import list_runs
-        runs = list_runs(_qa_log_root())
+        log_root = _qa_log_root()
+        runs = list_runs(log_root)
         for r in runs:
+            r["status"] = _infer_run_status(r, log_root)
             r.update(_infer_run_linkages(r))
         return ApiResponse(success=True, data={"runs": runs})
     except Exception as e:
@@ -1524,6 +1628,7 @@ async def get_qa_run(run_id: str):
         bundle = load_run(log_root, run_id)
         cached = load_cached_analysis(log_root, run_id)
         summary = bundle.get("summary") or {}
+        summary["status"] = _infer_run_status(summary, log_root)
         summary.update(_infer_run_linkages(summary))
         return ApiResponse(
             success=True,
@@ -1746,6 +1851,62 @@ def _universe_summary(name: str, instruments_path: Path) -> Dict[str, Any]:
         "last_data_mtime": last_data_iso,
         "sample_ticker": sample_ticker,
     }
+
+
+def _qlib_bundle_info() -> Dict[str, Any]:
+    """Return the qlib bundle's actual coverage so the FE can constrain
+    date pickers and warn on stale data.
+
+    Reads `data/qlib/us_data/calendars/day.txt` for first/last dates and
+    counts the instruments file rows. Both are cheap (file reads, no
+    iteration over feature bins). Returns:
+        {
+            "first_date": "2008-01-02",
+            "last_date":  "2026-05-06",
+            "trading_days": 4615,
+            "age_days": 4,                # days since last_date (today's tz)
+            "is_stale": false,            # age_days > 7
+            "is_missing": false,          # bundle dir missing entirely
+        }
+    """
+    info: Dict[str, Any] = {
+        "first_date": None,
+        "last_date": None,
+        "trading_days": 0,
+        "age_days": None,
+        "is_stale": False,
+        "is_missing": True,
+    }
+    try:
+        qlib_root = PROJECT_ROOT / "data" / "qlib" / "us_data"
+        cal_path = qlib_root / "calendars" / "day.txt"
+        if not cal_path.exists():
+            return info
+        info["is_missing"] = False
+        lines = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            return info
+        info["first_date"] = lines[0]
+        info["last_date"] = lines[-1]
+        info["trading_days"] = len(lines)
+        try:
+            last_dt = datetime.strptime(lines[-1], "%Y-%m-%d").date()
+            today = date.today()
+            age = (today - last_dt).days
+            info["age_days"] = age
+            info["is_stale"] = age > 7
+        except Exception:
+            pass
+    except Exception as exc:
+        info["error"] = f"failed to read bundle: {exc}"
+    return info
+
+
+@app.get("/api/v1/data/bundle", response_model=ApiResponse)
+async def get_qlib_bundle_info():
+    """Return the qlib bundle's date coverage and freshness so the FE
+    can cap date pickers and warn when refresh is needed."""
+    return ApiResponse(success=True, data=_qlib_bundle_info())
 
 
 @app.get("/api/v1/universes", response_model=ApiResponse)

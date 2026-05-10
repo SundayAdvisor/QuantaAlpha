@@ -759,9 +759,18 @@ class EvolutionController:
                         factor_info["code"] = ws.code_dict.get("factor.py", "")
                 factors.append(factor_info)
         
-        # Extract backtest metrics
+        # Extract backtest metrics. If experiment.result is None (upstream
+        # rdagent's QlibFBWorkspace.execute() returns None whenever ret.pkl
+        # isn't produced — see library.py for the parallel fallback),
+        # try reading qlib_res.csv directly from the combined workspace
+        # before giving up. Without this, every trajectory's
+        # backtest_metrics ends up {} and the run history shows "—" for
+        # best RankICIR / IR even though the backtest actually wrote
+        # IC/ICIR/RankIC/RankICIR/l2.* to disk.
         backtest_metrics = {}
         backtest_result = getattr(experiment, "result", None) if experiment else None
+        if backtest_result is None and experiment is not None:
+            backtest_result = self._read_qlib_res_csv(experiment)
         if backtest_result is not None:
             backtest_metrics = self._extract_metrics(backtest_result)
         
@@ -792,6 +801,39 @@ class EvolutionController:
             parent_ids=parent_ids,
         )
     
+    def _read_qlib_res_csv(self, experiment: Any):
+        """Fallback: read qlib_res.csv directly from the experiment's
+        combined workspace when experiment.result is None.
+
+        rdagent's workspace.execute() returns None whenever ret.pkl isn't
+        written (requires PortAnaRecord), even though qlib_res.csv with
+        IC/ICIR/RankIC/RankICIR/l2.* IS still produced. This recovery path
+        keeps the trajectory pool's backtest_metrics populated so the run
+        history UI can show meaningful best-RankICIR / best-IR numbers.
+        """
+        import pandas as pd
+        from pathlib import Path
+        try:
+            ws = getattr(experiment, "experiment_workspace", None)
+            ws_path = getattr(ws, "workspace_path", None) if ws is not None else None
+            if ws_path is None:
+                return None
+            csv_path = Path(str(ws_path)) / "qlib_res.csv"
+            if not csv_path.exists():
+                return None
+            df = pd.read_csv(csv_path, index_col=0)
+            if df.empty or df.shape[1] < 1:
+                return None
+            series = df.iloc[:, 0]
+            logger.info(
+                f"_read_qlib_res_csv: experiment.result was None, "
+                f"recovered {len(series)} metrics from {csv_path}"
+            )
+            return series
+        except Exception as e:
+            logger.warning(f"_read_qlib_res_csv: failed for {experiment}: {e}")
+            return None
+
     def _extract_metrics(self, result: Any) -> dict[str, Optional[float]]:
         """Extract metrics from backtest result."""
         import pandas as pd
