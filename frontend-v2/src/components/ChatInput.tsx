@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Send, Sparkles, Square, Compass, ChevronDown, ChevronRight, Wand2, Loader2 } from 'lucide-react';
 import { TaskConfig, UniverseSummary } from '@/types';
-import { listUniverses, detectUniverse } from '@/services/api';
+import { listUniverses, detectUniverse, getQlibBundle, QlibBundleInfo } from '@/services/api';
 
 interface ChatInputProps {
   onSubmit: (config: TaskConfig) => void;
@@ -44,6 +44,30 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const [testStart, setTestStart] = useState('2017-01-03');
   const [testEnd, setTestEnd] = useState('2026-05-07');
   const [universes, setUniverses] = useState<UniverseSummary[]>([]);
+  const [bundle, setBundle] = useState<QlibBundleInfo | null>(null);
+
+  useEffect(() => {
+    getQlibBundle().then((r) => {
+      if (r.success && r.data) setBundle(r.data);
+    }).catch(() => {});
+  }, []);
+
+  // When the bundle loads, clamp default testEnd / trainEnd / validEnd if they
+  // exceed the bundle's last_date — this prevents the silent PortAnaRecord
+  // failure mode where the conf asks for data past available bars.
+  useEffect(() => {
+    if (!bundle?.last_date) return;
+    const last = bundle.last_date;
+    setTestEnd((v) => (v && v > last ? last : v));
+    setTrainEnd((v) => (v && v > last ? last : v));
+    setValidEnd((v) => (v && v > last ? last : v));
+    const first = bundle.first_date;
+    if (first) {
+      setTrainStart((v) => (v && v < first ? first : v));
+      setValidStart((v) => (v && v < first ? first : v));
+      setTestStart((v) => (v && v < first ? first : v));
+    }
+  }, [bundle?.last_date, bundle?.first_date]);
   const [autoDetect, setAutoDetect] = useState(true);
   const [detectedUniverse, setDetectedUniverse] = useState<string | null>(null);
   const [detectReason, setDetectReason] = useState<string>('');
@@ -287,18 +311,49 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                         Date splits (YYYY-MM-DD)
                       </label>
                       <div className="grid grid-cols-2 gap-1.5 text-[10px]">
-                        <DateField label="train start" value={trainStart} onChange={setTrainStart} disabled={isRunning} />
-                        <DateField label="train end"   value={trainEnd}   onChange={setTrainEnd}   disabled={isRunning} />
-                        <DateField label="valid start" value={validStart} onChange={setValidStart} disabled={isRunning} />
-                        <DateField label="valid end"   value={validEnd}   onChange={setValidEnd}   disabled={isRunning} />
-                        <DateField label="test start"  value={testStart}  onChange={setTestStart}  disabled={isRunning} />
-                        <DateField label="test end"    value={testEnd}    onChange={setTestEnd}    disabled={isRunning} />
+                        <DateField label="train start" value={trainStart} onChange={setTrainStart} disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
+                        <DateField label="train end"   value={trainEnd}   onChange={setTrainEnd}   disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
+                        <DateField label="valid start" value={validStart} onChange={setValidStart} disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
+                        <DateField label="valid end"   value={validEnd}   onChange={setValidEnd}   disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
+                        <DateField label="test start"  value={testStart}  onChange={setTestStart}  disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
+                        <DateField label="test end"    value={testEnd}    onChange={setTestEnd}    disabled={isRunning} min={bundle?.first_date} max={bundle?.last_date} />
                       </div>
                     </div>
                   </div>
+                  {bundle && !bundle.is_missing && bundle.first_date && bundle.last_date && (
+                    <div className={`text-[10px] rounded border px-2 py-1.5 mt-2 ${bundle.is_stale
+                      ? 'border-amber-700/40 bg-amber-950/20 text-amber-200'
+                      : 'border-border bg-secondary/30 text-muted-foreground'}`}>
+                      <div className="flex items-baseline gap-2">
+                        <span className="font-mono font-semibold">qlib bundle</span>
+                        <span className="font-mono">{bundle.first_date} → {bundle.last_date}</span>
+                        <span className="font-mono opacity-70">({bundle.trading_days} days)</span>
+                        {bundle.age_days != null && (
+                          <span className={`font-mono ml-auto ${bundle.is_stale ? 'text-amber-300 font-semibold' : 'opacity-60'}`}>
+                            {bundle.is_stale ? `${bundle.age_days}d stale` : `fresh (${bundle.age_days}d old)`}
+                          </span>
+                        )}
+                      </div>
+                      {bundle.is_stale && (
+                        <div className="mt-1 text-[9px] leading-relaxed">
+                          ⚠ Bundle hasn't been refreshed in over a week. Run{' '}
+                          <code className="font-mono bg-amber-950/40 px-1 rounded">scripts/fetch_qlib_data.py --extend</code>{' '}
+                          before mining so test segments include recent bars and PortAnaRecord can produce IR / portfolio metrics.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {bundle?.is_missing && (
+                    <div className="text-[10px] rounded border border-red-700/40 bg-red-950/20 text-red-200 px-2 py-1.5 mt-2 leading-relaxed">
+                      ⚠ <strong>qlib bundle is missing.</strong> Mining will fail. Run{' '}
+                      <code className="font-mono bg-red-950/40 px-1 rounded">scripts/fetch_qlib_data.py --universe sp500 --start 2008-01-02 --rebuild</code>{' '}
+                      first. See <code className="font-mono">docs/data_setup.md</code>.
+                    </div>
+                  )}
                   <div className="text-[10px] text-muted-foreground italic border-t border-border pt-2">
-                    Defaults: train 2008–2015, valid 2016, test 2017→2026-05-07 (paper splits + extended OOS using freshly-fetched data).
-                    Note: mining computes its metrics on the test segment, so a longer test window = noisier per-iteration scores but more honest.
+                    Date pickers are capped to the bundle's actual coverage. Mining
+                    metrics are computed on the test segment, so a longer test
+                    window = noisier per-iteration scores but more honest.
                   </div>
                 </div>
               )}
@@ -357,15 +412,28 @@ const DateField: React.FC<{
   value: string;
   onChange: (v: string) => void;
   disabled?: boolean;
-}> = ({ label, value, onChange, disabled }) => (
-  <label className="flex flex-col gap-0.5">
-    <span className="text-muted-foreground">{label}</span>
-    <input
-      type="date"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      disabled={disabled}
-      className="rounded border border-border bg-background px-1.5 py-1 text-[11px] font-mono focus:border-primary focus:outline-none"
-    />
-  </label>
-);
+  min?: string | null;
+  max?: string | null;
+}> = ({ label, value, onChange, disabled, min, max }) => {
+  const outOfRange =
+    (min && value && value < min) || (max && value && value > max);
+  return (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-muted-foreground">{label}</span>
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        min={min ?? undefined}
+        max={max ?? undefined}
+        title={outOfRange ? `Outside bundle range (${min} → ${max})` : undefined}
+        className={`rounded border bg-background px-1.5 py-1 text-[11px] font-mono focus:outline-none ${
+          outOfRange
+            ? 'border-amber-600 text-amber-300 focus:border-amber-500'
+            : 'border-border focus:border-primary'
+        }`}
+      />
+    </label>
+  );
+};

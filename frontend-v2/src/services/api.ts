@@ -67,6 +67,22 @@ export interface MiningStartParams {
   testEnd?: string;
 }
 
+// ─── qlib data bundle info ─────────────────────────────────────────────────
+
+export interface QlibBundleInfo {
+  first_date: string | null;
+  last_date: string | null;
+  trading_days: number;
+  age_days: number | null;
+  is_stale: boolean;
+  is_missing: boolean;
+  error?: string;
+}
+
+export async function getQlibBundle() {
+  return request<QlibBundleInfo>('/api/v1/data/bundle');
+}
+
 // ─── Universes API ─────────────────────────────────────────────────────────
 
 export async function listUniverses() {

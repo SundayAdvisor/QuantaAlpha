@@ -2,22 +2,85 @@
 
 How to populate / refresh the qlib binary data QuantaAlpha mines on.
 
-> **TL;DR for a fresh setup (or to recover from "all metrics show 0" — see § [Symptom-driven](#symptom-driven-recovery)):**
+## First-time setup (read this if you've never run QA before)
+
+QuantaAlpha mines factors against **qlib-format binary data**. The repo
+ships **no data** (gitignored) — you have to fetch it yourself. Without
+this step every mining run will fail to produce metrics.
+
+Run these three commands once:
+
+```bash
+# 1. sp500 — main universe, paper-aligned default (~10-15 min, 745 tickers,
+#    ~550 with continuous data back to 2008)
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500 --start 2008-01-02 --rebuild
+
+# 2. nasdaq100 — tech-heavy variant (~5 min, 283 tickers, ~164 with full history)
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100 --start 2008-01-02 --rebuild
+
+# 3. ETFs you'll likely test seeds against (~1 min, 42 tickers including SPY/QQQ/TLT/sectors/leveraged/gold)
+.venv/Scripts/python.exe scripts/fetch_qlib_data.py --start 2008-01-02 --rebuild --tickers \
+  SPY QQQ TLT IEF SHY VWO BND IWM EEM SCZ TIP \
+  XLK XLF XLE XLV XLY XLI XLP XLU XLB XLRE XLC SOXX SMH XBI \
+  GLD IAU GDX GDXJ SLV SIVR PPLT USO UNG DBC DBA GSG PDBC \
+  UPRO SQQQ TQQQ SSO
+```
+
+Total wall time: ~15-25 min (yfinance throttles at ~1-2 tickers/sec). On
+completion you should have:
+
+```
+data/qlib/us_data/
+├── calendars/day.txt              # ~4615 trading days, 2008-01-02 → today-ish
+├── instruments/{sp500,nasdaq100,commodities,all}.txt
+└── features/<ticker>/*.bin         # 7 features per ticker (close/open/high/low/volume/factor/change)
+```
+
+The **two critical things** for mining to work:
+
+1. **`--start 2008-01-02`** — training segments expect data from 2008.
+   Without this, the qlib bundle only has data from when you first ran
+   the fetch script (often 2020-11-11 if you used the earlier "extend
+   forward" mode). Train/valid then have no data → model trains on
+   nothing → factor metrics become meaningless.
+
+2. **`--rebuild`** — wipes the calendar and rebuilds it from the dates
+   actually returned by yfinance. Without this, a previous calendar
+   (say 1999→2026) can stay in `day.txt` while the bins only cover
+   2020→2026, leading to silent index-out-of-range issues in qlib.
+
+Then run the [§ Verification check](#verifying-you-have-enough-data)
+to confirm everything's in place before kicking off your first mining
+task. The home page's mining form will also show a "qlib bundle"
+status chip with the actual coverage and a stale-warning banner if
+the bundle is older than 7 days.
+
+## Keeping the bundle current
+
+The bundle goes stale as new trading days happen. Two options:
+
+| Frequency | Command | What it does |
+|---|---|---|
+| **Weekly** | `.venv/Scripts/python.exe scripts/fetch_qlib_data.py --extend` | Appends bars from `last_date + 1` to today for every ticker in every universe |
+| **One-off catch-up** | Same as above | Same |
+| **Full re-fetch** (rare) | `.venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500 --start 2008-01-02 --rebuild` | Wipes and re-downloads everything |
+
+`--extend` is cheap (~1-2 min for sp500 + nasdaq100 + ETFs combined).
+Set a calendar reminder, or wire it into a cron / scheduled task.
+
+## TL;DR / quick recovery
+
 > ```bash
-> # IMPORTANT: --start 2008-01-02 is required so training segments (2008-2015)
-> # have actual data. Without this you'll get qlib_res.csv but PortAnaRecord
-> # silently fails -> empty backtest_results in the factor library.
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500       --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100   --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
-> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --tickers GLD IAU GDX GDXJ SLV USO UNG DBC GSG PDBC --start 2008-01-02 --end $(date +%Y-%m-%d) --rebuild
-> ```
-> Expect ~15-25 min wall time (yfinance throttling). After it finishes, run
-> the [§ Verification step](#verifying-you-have-enough-data) before kicking
-> off a mining task — if the verification check fails, your factor library
-> entries will show 0s for IC/RankIC/etc. even though mining "succeeds."
+> # If you've never set up data:
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe sp500     --start 2008-01-02 --rebuild
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --universe nasdaq100 --start 2008-01-02 --rebuild
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --start 2008-01-02 --rebuild --tickers SPY QQQ TLT GLD IAU IWM EEM XLK XLP XLF XLE XLV XLY XLI XLU XLB XLRE UPRO SQQQ TQQQ SSO
 >
-> See [§ Cookbook](#cookbook) for incremental refreshes, custom universes,
-> and recovery scenarios.
+> # If you've fallen behind by a few days/weeks:
+> .venv/Scripts/python.exe scripts/fetch_qlib_data.py --extend
+>
+> # If factor metrics all show 0 / "—" — the data is wrong, jump to § Symptom-driven recovery.
+> ```
 
 ## What we have
 

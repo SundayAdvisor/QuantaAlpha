@@ -14,7 +14,7 @@ import signal
 import subprocess
 import sys
 import uuid
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -644,6 +644,49 @@ async def health_check():
 @app.post("/api/v1/mining/start", response_model=ApiResponse)
 async def start_mining(req: MiningStartRequest):
     """Start a new factor mining experiment."""
+    # Validate date ranges against the qlib bundle's actual coverage.
+    # Asking for data past last_date causes qlib's PortAnaRecord to fail
+    # silently (no report_normal_1day.pkl) which strips IR and the rich
+    # 1day.* portfolio metrics from every trajectory.
+    bundle = _qlib_bundle_info()
+    if bundle.get("is_missing"):
+        return ApiResponse(
+            success=False,
+            error=(
+                "qlib data bundle is missing. Run "
+                "`.venv/Scripts/python.exe scripts/fetch_qlib_data.py "
+                "--universe sp500 --start 2008-01-02 --rebuild` first. "
+                "See docs/data_setup.md."
+            ),
+        )
+    bundle_last = bundle.get("last_date")
+    bundle_first = bundle.get("first_date")
+    if bundle_last and bundle_first:
+        # Collect the date fields the user submitted
+        offenders = []
+        for label, value in (
+            ("trainStart", req.trainStart), ("trainEnd", req.trainEnd),
+            ("validStart", req.validStart), ("validEnd", req.validEnd),
+            ("testStart", req.testStart),   ("testEnd", req.testEnd),
+        ):
+            if value and value > bundle_last:
+                offenders.append(f"{label}={value}")
+            elif value and value < bundle_first:
+                offenders.append(f"{label}={value} (before bundle start)")
+        if offenders:
+            return ApiResponse(
+                success=False,
+                error=(
+                    f"Date(s) outside the qlib bundle's coverage "
+                    f"({bundle_first} -> {bundle_last}): "
+                    + ", ".join(offenders)
+                    + ". Either pick dates inside that range OR refresh the "
+                    "bundle: `.venv/Scripts/python.exe scripts/fetch_qlib_data.py "
+                    "--extend` (forward only) or `--universe sp500 --start "
+                    f"{bundle_first} --rebuild` (full)."
+                ),
+            )
+
     task_id = _gen_id()
     task = {
         "taskId": task_id,
@@ -1808,6 +1851,62 @@ def _universe_summary(name: str, instruments_path: Path) -> Dict[str, Any]:
         "last_data_mtime": last_data_iso,
         "sample_ticker": sample_ticker,
     }
+
+
+def _qlib_bundle_info() -> Dict[str, Any]:
+    """Return the qlib bundle's actual coverage so the FE can constrain
+    date pickers and warn on stale data.
+
+    Reads `data/qlib/us_data/calendars/day.txt` for first/last dates and
+    counts the instruments file rows. Both are cheap (file reads, no
+    iteration over feature bins). Returns:
+        {
+            "first_date": "2008-01-02",
+            "last_date":  "2026-05-06",
+            "trading_days": 4615,
+            "age_days": 4,                # days since last_date (today's tz)
+            "is_stale": false,            # age_days > 7
+            "is_missing": false,          # bundle dir missing entirely
+        }
+    """
+    info: Dict[str, Any] = {
+        "first_date": None,
+        "last_date": None,
+        "trading_days": 0,
+        "age_days": None,
+        "is_stale": False,
+        "is_missing": True,
+    }
+    try:
+        qlib_root = PROJECT_ROOT / "data" / "qlib" / "us_data"
+        cal_path = qlib_root / "calendars" / "day.txt"
+        if not cal_path.exists():
+            return info
+        info["is_missing"] = False
+        lines = [ln.strip() for ln in cal_path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+        if not lines:
+            return info
+        info["first_date"] = lines[0]
+        info["last_date"] = lines[-1]
+        info["trading_days"] = len(lines)
+        try:
+            last_dt = datetime.strptime(lines[-1], "%Y-%m-%d").date()
+            today = date.today()
+            age = (today - last_dt).days
+            info["age_days"] = age
+            info["is_stale"] = age > 7
+        except Exception:
+            pass
+    except Exception as exc:
+        info["error"] = f"failed to read bundle: {exc}"
+    return info
+
+
+@app.get("/api/v1/data/bundle", response_model=ApiResponse)
+async def get_qlib_bundle_info():
+    """Return the qlib bundle's date coverage and freshness so the FE
+    can cap date pickers and warn when refresh is needed."""
+    return ApiResponse(success=True, data=_qlib_bundle_info())
 
 
 @app.get("/api/v1/universes", response_model=ApiResponse)
